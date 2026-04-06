@@ -43,11 +43,11 @@ class Unit:
         self.buff_stacks_dict = {}        #can only be modified by modify_buff_stack_dict, which is called at two points: in check_stack() and at ability expiration (in special method)
 
         self._hp = 100                    #cannot surpass max_hp (stops at max in setter method)
-        self._mp = 20                    #cannot surpass max_mp (stops at max in setter method)
+        self._mp = 25                    #cannot surpass max_mp (stops at max in setter method)
 
         self._max_hp = 100
-        self._max_mp = 20
-        self._ATK = 9
+        self._max_mp = 25
+        self._ATK = 10
         self._DEF = 3            # dmg - defense = final dmg
         self._MAGIC = 0                                                                 #just magic and no magic_def? so high magic is ineffective against high magic
         self._MAGIC_DEF = 0            # magic dmg - magic defense = final dmg
@@ -140,87 +140,83 @@ class Unit:
     def display_health(cls):   
 
         def display(unit):
-            print("        {:20} HP:{:3}/{:3}    MP:{:3}/{:3}  ".format(str(unit), unit.hp, unit.max_hp, unit.mp, unit.max_mp), end='')
-            for buff in unit.buff_stacks_dict.keys():
+            status = " DOWN" if not unit.alive else ""
+            print("        {:20} HP:{:3}/{:3}    MP:{:3}/{:3}{}  ".format(
+                str(unit), unit.hp, unit.max_hp, unit.mp, unit.max_mp, status), end='')
+            for buff, stacks in unit.buff_stacks_dict.items():
                 print(" " + buff, end='')
-                if unit.buff_stacks_dict[buff] > 1:
-                    print("x" + str(unit.buff_stacks_dict[buff]), end='')
+                if stacks > 1:
+                    print("x" + str(stacks), end='')
             print()
 
         print("\n       ===============================================")
-        for i in range(len(Unit.team_zero_list)):
-            ally = Unit.team_zero_list[i]
+        for ally in Unit.team_zero_list:
             display(ally)
         print("        -----------------------------------------------")
-        for i in range(len(Unit.team_one_list)):
-            enemy = Unit.team_one_list[i]
+        for enemy in Unit.team_one_list:
             display(enemy)
         print("       ===============================================\n")
-        #time.sleep(1.0)
 
 
     @classmethod
     def remove_all(cls):
-        for l in [Unit.team_zero_list,Unit.team_one_list]:
+        for l in [Unit.team_zero_list, Unit.team_zero_alive_list, Unit.team_one_list, Unit.team_one_alive_list]:
             l.clear()
-            del l[:]
 
-    # checks all units, if unit is_dead(), call kill_unit() (MAYBE CHANGE) and Ability.clear_target()
+    # checks all units, if unit is_dead(), call kill_unit() and remove effects targeting them
     @classmethod
-    def downed(cls):
-        for team in Unit.all_units_list:
-            for unit in team:
+    def downed(cls, battle=None):
+        for team in [Unit.team_zero_list, Unit.team_one_list]:
+            for unit in team[:]:
                 if unit.is_dead():
-                    if unit in Unit.team_one_alive_list or unit in Unit.team_zero_alive_list:                        
+                    if unit in Unit.team_zero_alive_list or unit in Unit.team_one_alive_list:
                         Unit.kill_unit(unit)
                         time.sleep(0.4)
-                        print("{} is down!\n".format(str(unit)))       
-                        Ability.clear_target(unit)                     
+                        print("{} is down!\n".format(str(unit)))
+                        if battle is not None:
+                            battle.remove_target_effects(unit)
 
 #~~~~~~~~~~~~Instance methods~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     #acquire valid move from user, then create an Ability object and put in Ability.Ability_queue, then call object.determine_targets() through that object
-    def choose_move(self, calling_ability=None, is_multiplayer = True):
+    def choose_move(self, battle, calling_ability=None, is_multiplayer = True):
         move_id_counter = 0
-        if calling_ability != None:
-            Ability.Ability_queue.remove(calling_ability)
-            self.target_Ability_queue.remove(calling_ability)
-        Ability.check_Ability_queue(casting_unit = self)
+        if calling_ability is not None:
+            battle.remove_effect(calling_ability)
+        battle.resolve_turn_start(self)
         Unit.display_health()                   #display HP of all alive Units
-        Unit.downed()                          #confirm any dead units at this point
+        Unit.downed(battle)                          #confirm any dead units at this point
         if Unit.num_units(1 - self.team, "alive") <= 0:                 #check win condition for this unit's team,
             return                                                          #if true, return
 
         print("    -------------- {}'s move --------------".format(str(self)))
         time.sleep(0.8)
 
-        if is_multiplayer == True:
+        if is_multiplayer:
             self.display_moves(self.movesList)
-            self.display_buff_prompts()
+            # self.display_buff_prompts()
             while True:
                 print("> What would you like to do?")
                 try:
-                    self_move = int(input(">"))                                 #self_move is user input (int) -1 for move index
-                    if self_move in range(1,len(self.movesList)+1):             #if valid move
-                        move_name = self.movesList[self_move-1]                     #valid move will be called move_name (str)
-
-                        mana_required = Ability.get_attr(move_name, "MP_COST")              #check MP
-                        if self.mp_check(mana_required):                                    #if passes mana check, break out of while loop
+                    self_move = int(input(">"))
+                    if self_move in range(1, len(self.movesList) + 1):
+                        move_name = self.movesList[self_move - 1]
+                        mana_required = Ability.get_attr(move_name, "MP_COST")
+                        if self.mp_check(mana_required):
                             break
-                    else:                                                                               #if move not valid
-                        print("Please enter a number between 1-{}\n".format(len(self.movesList)))           #print request for valid input
-                except ValueError:                                                                          #
-                    print("Please enter a number between 1-{}\n".format(len(self.movesList)))               #
+                        continue
+                    print("Please enter a number between 1-{}\n".format(len(self.movesList)))
+                except ValueError:
+                    print("Please enter a number between 1-{}\n".format(len(self.movesList)))
         else:
-            self.display_buff_prompts()
-            move_name = self.movesList[1] 
+            # self.display_buff_prompts()
+            move_name = self.movesList[1]
         current_Ability = Ability(move_name, Ability.ability_ID_counter)    #create Ability object
-        Ability.Ability_queue += [current_Ability]                          #add it to the queue
-        self.target_Ability_queue += [current_Ability]
-        target_list = current_Ability.determine_targets(self, is_multiplayer)               #call ability's determine_targets
-        if target_list == None:                       
+        target_list = current_Ability.determine_targets(self, battle, is_multiplayer)               #call ability's determine_targets
+        if target_list is None:
             return
-        Unit.downed()
+        battle.resolve_after_action(self)
+        Unit.downed(battle)
         time.sleep(0.6)
         Unit.display_health()                  #display HP of all alive Units
         input("Press <ENTER> to continue...\n")
@@ -228,13 +224,14 @@ class Unit:
 
     #Displays a unit's moveList
     def display_moves(self, movesList):
-        for move in self.movesList:                                                 #print a list of available moves from dicts
-            print("{}. {:18}".format(movesList.index(move) + 1, move), end='')      #
-            if Ability.get_attr(move,"MP_COST") != 0:                                    #
-                print("MP cost: {:<3}  ".format(Ability.get_attr(move,"MP_COST")), end='')            #
-            else:                                                                   #
-                print("No cost       ", end='')                                                    #
-            print(Ability.get_attr(move,"INFO"))
+        for index, move in enumerate(movesList, start=1):
+            print("{}. {:18}".format(index, move), end='')
+            mp_cost = Ability.get_attr(move, "MP_COST")
+            if mp_cost != 0:
+                print("MP cost: {:<3}  ".format(mp_cost), end='')
+            else:
+                print("No cost       ", end='')
+            print(Ability.get_attr(move, "INFO"))
             time.sleep(0.08)
 
     #checks if enough mana, if enough then return True, else False
@@ -251,10 +248,17 @@ class Unit:
             return True
         return False
 
-    def display_buff_prompts(self):                ###############################################################
+    def display_buff_prompts(self):
+        if not self.buff_stacks_dict:
+            return
         print()
-        if "+ATK" in self.buff_stacks_dict:
-            print("{}'s sword is razor sharp".format(str(self)))
+        prompts = []
+        for buff_name, stacks in self.buff_stacks_dict.items():
+            if stacks > 1:
+                prompts.append(f"{buff_name} x{stacks}")
+            else:
+                prompts.append(buff_name)
+        print(f"{str(self)} has active effects: {', '.join(prompts)}")
 
 
     def modify_buff_stack_dict(self, add_or_remove, buff_name):
@@ -370,6 +374,19 @@ class Unit:
             self._MAGIC = val
     #--------------------------
     @property
+    def MAGIC_DEF(self):
+        return self._MAGIC_DEF
+
+    @MAGIC_DEF.setter
+    def MAGIC_DEF(self, val):
+        if val < 0:
+            self._MAGIC_DEF = 0
+        #elif val > 100:
+            #self._MAGIC_DEF = 100
+        else:
+            self._MAGIC_DEF = val
+    #--------------------------
+    @property
     def CRIT(self):
         return self._CRIT
 
@@ -443,12 +460,12 @@ class Unit_Knight(Unit):
 
 
         self.max_hp = 100
-        self.max_mp = 15
+        self.max_mp = 20
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
         self.mp = 20                    #cannot surpass max_mp (stops at max in setter method)
 
-        self.ATK = 15
-        self.DEF = 7            # dmg - defense = final dmg
+        self.ATK = 18
+        self.DEF = 8            # dmg - defense = final dmg
         self.MAGIC = 0
         self.MAGIC_DEF = 0 
         self.CRIT = 10          # /100%
@@ -468,19 +485,19 @@ class Unit_Thief(Unit):
         super().__init__(name, team)
 
         self.max_hp = 100
-        self.max_mp = 25
+        self.max_mp = 30
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
-        self.mp = 25                    #cannot surpass max_mp (stops at max in setter method)
+        self.mp = 30                    #cannot surpass max_mp (stops at max in setter method)
 
         self.ATK = 12
-        self.DEF = 2            # dmg - defense = final dmg
+        self.DEF = 3            # dmg - defense = final dmg
         self.MAGIC = 2
         self.MAGIC_DEF = 2 
         self.CRIT = 25          # /100%
         self.DODGE = 15          # /100%
         self.SPEED = 16         # max speed is 20
 
-        self.movesList = ["Rest", "Dagger stab", 'Feint', 'Poison', 'Taunt']
+        self.movesList = ["Rest", "Dagger Stab", 'Feint', 'Poison', 'Taunt']
 
     def __str__(self):
         return self.name + " the " + Unit_Thief.className
@@ -493,14 +510,14 @@ class Unit_Priest(Unit):
         super().__init__(name, team)
 
         self.max_hp = 100
-        self.max_mp = 50
+        self.max_mp = 60
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
-        self.mp = 50                    #cannot surpass max_mp (stops at max in setter method)
+        self.mp = 60                    #cannot surpass max_mp (stops at max in setter method)
 
-        self.ATK = 7
-        self.DEF = 0            # dmg - defense = final dmg
+        self.ATK = 5
+        self.DEF = 1            # dmg - defense = final dmg
         self.MAGIC = 12
-        self.MAGIC_DEF = 9 
+        self.MAGIC_DEF = 10 
         self.CRIT = 5          # /100%
         self.DODGE = 5          # /100%
         self.SPEED = 10         # max speed is 20
@@ -509,5 +526,32 @@ class Unit_Priest(Unit):
 
     def __str__(self):
         return self.name + " the " + Unit_Priest.className
+
+class Unit_Berserker(Unit):
+
+    className = "Berserker"
+
+    def __init__(self, name, team):
+        super().__init__(name, team)
+
+
+        self.max_hp = 100
+        self.max_mp = 20
+        self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
+        self.mp = 20                    #cannot surpass max_mp (stops at max in setter method)
+
+        self.ATK = 15
+        self.DEF = 3            # dmg - defense = final dmg
+        self.MAGIC = 0
+        self.MAGIC_DEF = 0 
+        self.CRIT = 15          # /100%
+        self.DODGE = 2          # /100%
+        self.SPEED = 8         # max speed is 20
+
+        self.movesList = ["Rest", "Cleave", "War Cry", "Taunt"]
+
+    def __str__(self):
+        return self.name + " the " + Unit_Berserker.className
+
 
 from Abilities import Ability
