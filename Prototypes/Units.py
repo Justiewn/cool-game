@@ -493,11 +493,11 @@ class Unit_Thief(Unit):
         self.DEF = 3            # dmg - defense = final dmg
         self.MAGIC = 2
         self.MAGIC_DEF = 2 
-        self.CRIT = 25          # /100%
-        self.DODGE = 10          # /100%
+        self.CRIT = 20          # /100%
+        self.DODGE = 15          # /100%
         self.SPEED = 16         # max speed is 20
 
-        self.movesList = ["Rest", "Dagger Stab", 'Feint', 'Poison', 'Exhaust']
+        self.movesList = ["Rest", "Dagger Stab", 'Sneak', 'Poison', 'Deceive']
 
     def __str__(self):
         return self.name + " the " + Unit_Thief.className
@@ -516,7 +516,7 @@ class Unit_Priest(Unit):
 
         self.ATK = 5
         self.DEF = 1            # dmg - defense = final dmg
-        self.MAGIC = 12
+        self.MAGIC = 14
         self.MAGIC_DEF = 10 
         self.CRIT = 5          # /100%
         self.DODGE = 5          # /100%
@@ -553,5 +553,29 @@ class Unit_Berserker(Unit):
     def __str__(self):
         return self.name + " the " + Unit_Berserker.className
 
+class Unit_Assassin(Unit):
+
+    className = "Assassin"
+
+    def __init__(self, name, team):
+        super().__init__(name, team)
+
+        self.max_hp = 100
+        self.max_mp = 35
+        self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
+        self.mp = 35                    #cannot surpass max_mp (stops at max in setter method)
+
+        self.ATK = 14
+        self.DEF = 2            # dmg - defense = final dmg
+        self.MAGIC = 0
+        self.MAGIC_DEF = 0 
+        self.CRIT = 25          # /100%
+        self.DODGE = 10          # /100%
+        self.SPEED = 20         # max speed is 20
+
+        self.movesList = ["Rest", "Dagger Stab", 'Shroud', 'Mark', 'Finish']
+
+    def __str__(self):
+        return self.name + " the " + Unit_Assassin.className
 
 from Abilities import Ability

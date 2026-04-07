@@ -113,12 +113,16 @@ class Ability():
         
         self.special_mapDict = { "Sharpen sword" :  self.IncreaseATK,
             'Raise shield': self.RaiseShield,
-            'Feint':  self.Feint, 
+            'Sneak':  self.Sneak, 
+            'Shroud':  self.Shroud, 
             'Taunt' :  self.Taunt,
-            'Exhaust' :  self.Exhaust,
+            'Deceive' :  self.Deceive,
+            'Disquiet' :  self.Disquiet,
             "Poison": self.Poison ,
             "Leech": self.Leech,          
-            "Frenzy": self.Frenzy          
+            "Frenzy": self.Frenzy,
+            "Mark": self.Mark,
+            "Finish": self.Finish,
             }
 
 #========================================Class methods===========================================================================================
@@ -257,7 +261,7 @@ class Ability():
                 battle.register_effect(self)
 
         # for compatibility, support buff expiry after caster action if the ability has a delayed end
-        if self.turns_left == 0 and self.AttrValDict["IS_BUFF"]:
+        if self.turns_left == 0 and self.AttrValDict["IS_BUFF"] and success:
             for target in self.target_list:
                 target.modify_buff_stack_dict("remove", self.AttrValDict["BUFF_STATUS"])
         return success
@@ -326,7 +330,7 @@ class Ability():
                 elif success == False:                                                                  #elif move was unsuccessful
                     self.turns_left = 0     
             dmg_type = self.AttrValDict["DMG_TYPE"]                                                                #set turns_left to 0 to be deleted by check_Ability_queue()
-            if dmg_type in ["NORMAL", "MAGIC"]:
+            if success is None and dmg_type in ["NORMAL", "MAGIC"]:
                 raw_damage = self.calculate_dmg(caster, dmg_type)
                 final_damage = self.calculate_def(raw_damage, target, dmg_type)
                 is_crit = random.random() < caster.CRIT / 100
@@ -444,7 +448,7 @@ class Ability():
             print("{} took {} damage from a poison dart!".format(str(target), damage))
         else:
             stacks = target.buff_stacks_dict.get(self.AttrValDict["BUFF_STATUS"], 1)
-            tick_damage = math.floor(2 + 2 * (stacks - 1))
+            tick_damage = math.floor( 7 + (stacks - 1))
             target.hp -= tick_damage
             print("{} took {} damage from poison!".format(str(target), tick_damage))
             if self.turns_left == 0:
@@ -464,10 +468,18 @@ class Ability():
             print("{} lowers their shield".format(str(target)))
 
     #
-    def Feint(self, target, caster=None):                                                                                  # also in future it could mean value could vary with unit stats e.g. MAGIC
-        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, increase ATK by 10
+    def Sneak(self, target, caster=None):                                                                                  # also in future it could mean value could vary with unit stats e.g. MAGIC
+        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast,
             self.buff_stat_modifier("add", target)
-            print("{}'s DODGE has increased by 60%!".format(str(target)))
+            print("{}'s DODGE has increased by 40 and CRIT by 10!".format(str(target)))
+        elif self.turns_left == 0:                                                        #reverse effects in last turn
+            self.buff_stat_modifier("remove", target)
+            print("{} takes a steady stance. Their DODGE and CRIT return to normal.".format(str(target)))
+    #
+    def Shroud(self, target, caster=None):                                                                                  # also in future it could mean value could vary with unit stats e.g. MAGIC
+        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast,
+            self.buff_stat_modifier("add", target)
+            print("{}'s DODGE has increased by 70!".format(str(target)))
         elif self.turns_left == 0:                                                        #reverse effects in last turn
             self.buff_stat_modifier("remove", target)
             print("{} takes a steady stance. Their DODGE returns to normal.".format(str(target)))
@@ -481,13 +493,21 @@ class Ability():
             self.buff_stat_modifier("remove", target)
             print("{} regains his composure. His DEF returns to normal".format(str(target)))
     #
-    def Exhaust(self, target, caster=None):                                                                                  
+    def Deceive(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
             self.buff_stat_modifier("add", target)
-            print("{}'s ATK and DEF have decreased by 4 and DODGE by 10!".format(str(target)))
+            print("{}'s DEF has decreased by 5 and DODGE by 10!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
             self.buff_stat_modifier("remove", target)
-            print("{} regains his composure. His ATK, DEF, and DODGE return to normal.".format(str(target)))
+            print("{} regains his composure. His DEF and DODGE return to normal.".format(str(target)))
+    #
+    def Disquiet(self, target, caster=None):                                                                                  
+        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
+            self.buff_stat_modifier("add", target)
+            print("{}'s ATK and CRIT have decreased by 8 and 15!".format(str(target)))
+        elif self.turns_left == 0:                                                           #reverse effects in last turn
+            self.buff_stat_modifier("remove", target)
+            print("{} regains his composure. His ATK and CRIT return to normal.".format(str(target)))
 
     #
     def Frenzy(self, target, caster=None):                                                                                  
@@ -497,6 +517,35 @@ class Ability():
         elif self.turns_left == 0:                                                           #reverse effects in last turn
             self.buff_stat_modifier("remove", target)
             print("{} calms. His ATK and CRIT return to normal.".format(str(target)))
+
+    #
+    def Mark(self, target, caster=None):
+        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, apply DEF penalty
+            target.DEF -= 4
+            print("{} has been Marked! Their DEF has decreased by 4!".format(str(target)))
+        elif self.turns_left == 0:                                                        #reverse effect on expiry
+            target.DEF += 4
+            print("{} is no longer Marked. Their DEF returns to normal.".format(str(target)))
+
+    #
+    def Finish(self, target, caster):
+        if "MARKED" not in target.buff_stacks_dict:                             #can only be used on MARKED targets
+            print("{} is not Marked! Finish cannot be used on them.".format(str(target)))
+            return False
+        raw_damage = self.calculate_dmg(caster, "NORMAL")
+        final_damage = self.calculate_def(raw_damage, target, "NORMAL")
+        is_crit = random.random() < caster.CRIT / 100
+        if is_crit and final_damage > 0:
+            final_damage = math.ceil(final_damage * 1.5)
+        Ability.damage_target(final_damage, target, "NORMAL", is_crit)
+        self.last_damage_dealt = getattr(self, 'last_damage_dealt', 0) + max(0, final_damage)
+        missing_hp = target.max_hp - target.hp
+        bonus_damage = math.floor(missing_hp * 0.2)
+        if bonus_damage > 0:
+            target.hp -= bonus_damage
+            self.last_damage_dealt += bonus_damage
+            print("{} takes an additional {} damage from their wounds!".format(str(target), bonus_damage))
+        return True
 
 
 from Units import Unit, Unit_Knight, Unit_Thief, Unit_Priest

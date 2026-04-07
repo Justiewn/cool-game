@@ -5,7 +5,7 @@ import random
 import sys
 import time
 from battle import Battle
-from Units import Unit, Unit_Knight, Unit_Thief, Unit_Priest, Unit_Berserker
+from Units import Unit, Unit_Knight, Unit_Thief, Unit_Priest, Unit_Berserker, Unit_Assassin
 from Abilities import Ability
 
 # Pygame GUI for the turn-based battle prototype
@@ -96,8 +96,8 @@ class Button:
 
 
 class GameGUI:
-    CLASS_OPTIONS = ['T', 'P', 'K', 'TH', 'B']
-    CLASS_NAMES = {'T': 'Thug', 'P': 'Priest', 'K': 'Knight', 'TH': 'Thief', 'B': 'Berserker'}
+    CLASS_OPTIONS = ['T', 'P', 'K', 'TH', 'B', 'A']
+    CLASS_NAMES = {'T': 'Thug', 'P': 'Priest', 'K': 'Knight', 'TH': 'Thief', 'B': 'Berserker', 'A': 'Assassin'}
 
     def __init__(self):
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -155,6 +155,7 @@ class GameGUI:
             "Thief": "thief.png",
             "Priest": "priest.png",
             "Berserker": "berserker.png",
+            "Assassin": "assassin.png",
         }
         portraits = {}
         fallback = self.create_fallback_portrait()
@@ -205,6 +206,8 @@ class GameGUI:
                 Unit_Thief(name, 0)
             elif class_key == 'B':
                 Unit_Berserker(name, 0)
+            elif class_key == 'A':
+                Unit_Assassin(name, 0)
             else:
                 Unit(name, 0)
 
@@ -218,6 +221,8 @@ class GameGUI:
                 Unit_Thief(name, 1)
             elif class_key == 'B':
                 Unit_Berserker(name, 1)
+            elif class_key == 'A':
+                Unit_Assassin(name, 1)
             else:
                 Unit(name, 1)
 
@@ -416,6 +421,10 @@ class GameGUI:
             self.log(f"Not enough MP for {move_name}.")
             return
         available_targets = self.resolve_available_targets(self.selected_ability)
+        if not available_targets:
+            self.log(f"No valid targets for {move_name}.")
+            self.selected_ability = None
+            return
         if self.selected_ability.AttrValDict["TARGET_TYPE"] == 1 and len(available_targets) > 1:
             self.available_targets = available_targets
             self.info_text = f"Select a target for {move_name}."
@@ -436,6 +445,8 @@ class GameGUI:
             team = Unit.get_units("alive", self.current_unit.team)
 
         if target_type in (1, 2, 3):
+            if ability.ABILITY_NAME == "Finish":
+                team = [u for u in team if "MARKED" in u.buff_stacks_dict]
             return team
         if target_type == 4:
             return Unit.get_units("alive", 0) + Unit.get_units("alive", 1)
