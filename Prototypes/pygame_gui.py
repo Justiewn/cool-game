@@ -30,6 +30,13 @@ LOG_TEXT = (230, 230, 230)
 
 pygame.init()
 pygame.font.init()
+pygame.mixer.init()
+AI_CAST_EVENT = pygame.USEREVENT + 1
+AI_SHOW_EVENT = pygame.USEREVENT + 2
+NEXT_TURN_EVENT = pygame.USEREVENT + 3
+HIT_SOUND_EVENT = pygame.USEREVENT + 4
+HIT_DMG_LIGHT = 14
+HIT_DMG_MEDIUM = 26
 FONT = pygame.font.SysFont("arial", 18)
 TITLE_FONT = pygame.font.SysFont("arial", 24, bold=True)
 SMALL_FONT = pygame.font.SysFont("arial", 14)
@@ -91,8 +98,6 @@ class Button:
 class GameGUI:
     CLASS_OPTIONS = ['T', 'P', 'K', 'TH', 'B']
     CLASS_NAMES = {'T': 'Thug', 'P': 'Priest', 'K': 'Knight', 'TH': 'Thief', 'B': 'Berserker'}
-    CLASS_COLORS = {'T': (180, 180, 180), 'P': (170, 120, 230), 'K': (230, 200, 120), 'TH': (120, 220, 180), 'B': (220, 100, 100)}
-    CLASS_ICONS = {'T': 'T', 'P': 'P', 'K': 'K', 'TH': 'TH', 'B': 'B'}
 
     def __init__(self):
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -114,6 +119,10 @@ class GameGUI:
         self.hovered_ability_button = None
         self.hovered_ability_info = {}
         self.cancel_target_button = None
+        self.ai_targeted_units = []
+        self.ai_pending_targets = None
+        self.action_locked = False
+        self._pending_hit_sound = None
         self.current_team = 0
         self.current_index = 0
         self.info_text = "Select your team and enemy team to begin."
@@ -123,6 +132,8 @@ class GameGUI:
         self.enemy_ai_enabled = True
         self.log_scroll = 0
         self.unit_portraits = self.load_unit_portraits()
+        self.sounds = {}
+        self.load_sounds()
         self.original_print = builtins.print
         builtins.print = self._print_and_log
         self.setup_team_selection()
@@ -155,6 +166,26 @@ class GameGUI:
             except Exception:
                 portraits[class_name] = fallback
         return portraits
+
+    def load_sounds(self):
+        sounds_dir = os.path.join(os.path.dirname(__file__), "sounds")
+        for ability_name, attrs in Ability.AbilitiesDict.items():
+            cast_sound = attrs.get("CAST_SOUND") if isinstance(attrs, dict) else None
+            if cast_sound:
+                path = os.path.join(sounds_dir, cast_sound)
+                try:
+                    self.sounds[ability_name] = pygame.mixer.Sound(path)
+                except Exception:
+                    pass
+        for name, filename in (("hit_sharp_no_dmg", "hit_sharp_no_dmg.mp3"), ("hit_sharp_light", "hit_sharp_light.mp3"), ("hit_sharp_medium", "hit_sharp_medium.mp3"), ("hit_sharp_heavy", "hit_sharp_heavy.mp3"),
+                               ("hit_blunt_no_dmg", "hit_blunt_no_dmg.mp3"), ("hit_blunt_light", "hit_blunt_light.mp3"), ("hit_blunt_medium", "hit_blunt_medium.mp3"), ("hit_blunt_heavy", "hit_blunt_heavy.mp3"),
+                               ("hit_magic_no_dmg", "hit_magic_no_dmg.mp3"), ("hit_magic_light", "hit_magic_light.mp3"), ("hit_magic_medium", "hit_magic_medium.mp3"), ("hit_magic_heavy", "hit_magic_heavy.mp3"),
+                               ("miss", "miss.wav")):
+            path = os.path.join(sounds_dir, filename)
+            try:
+                self.sounds[name] = pygame.mixer.Sound(path)
+            except Exception:
+                pass
 
     def get_portrait_for_unit(self, unit):
         class_name = getattr(type(unit), "className", "Thug")
@@ -308,13 +339,47 @@ class GameGUI:
         self.selected_ability = None
         self.available_targets = None
         self.build_action_buttons()
+        self.action_locked = False
         if self.current_unit.team == 1 and self.enemy_ai_enabled:
             self.execute_enemy_ai()
 
     def build_action_buttons(self):
         self.action_buttons.clear()
         moves = self.current_unit.movesList
-        for index, move in enumerate(moves):
+
+        # Find the y-position of the current unit's card
+        alive_team = Unit.get_units("alive", self.current_unit.team)
+        try:
+            unit_index = alive_team.index(self.current_unit)
+        except ValueError:
+            unit_index = 0
+        card_y = 30 + unit_index * 180
+        card_h = 160
+        is_player = self.current_unit.team == 0
+
+        ABILITY_W = 217
+        REST_W = 45
+        GAP = 5
+        CARD_GAP = 10
+        btn_h_total = int(card_h * 0.8)
+        btn_y_offset = (card_h - btn_h_total) // 2
+
+        other_moves = [m for m in moves if m != "Rest"]
+        has_rest = "Rest" in moves
+        n = len(other_moves)
+
+        if is_player:
+            # Player card right edge at x=330; Rest closest to card (left), abilities to the right
+            rest_x = 30 + 300 + CARD_GAP
+            ability_x = rest_x + REST_W + GAP
+        else:
+            # Enemy card left edge at x=760; abilities on the left, Rest closest to card (right)
+            rest_x = 760 - CARD_GAP - REST_W
+            ability_x = rest_x - GAP - ABILITY_W
+
+        btn_h = (btn_h_total // n) if n > 0 else btn_h_total
+
+        for i, move in enumerate(other_moves):
             def make_action(move_name=move):
                 return lambda: self.select_move(move_name)
             tooltip = ""
@@ -323,10 +388,25 @@ class GameGUI:
                 tooltip = Ability.get_attr(move, "INFO") or ""
                 mp_cost = Ability.get_attr(move, "MP_COST") or 0
             except Exception:
-                tooltip = ""
-                mp_cost = 0
-            rect = (390, 220 + index * 60, 320, 45)
-            self.action_buttons.append(Button(rect, move, make_action(), color=BUTTON_COLOR, hover_color=BUTTON_HOVER, tooltip=tooltip, right_text=f"MP {mp_cost}"))
+                tooltip, mp_cost = "", 0
+            btn_y = card_y + btn_y_offset + i * btn_h
+            h = (btn_h_total - i * btn_h) if i == n - 1 else btn_h
+            rect = (ability_x, btn_y, ABILITY_W, h)
+            self.action_buttons.append(Button(rect, move, make_action(), color=BUTTON_COLOR,
+                                            hover_color=BUTTON_HOVER, tooltip=tooltip,
+                                            right_text=f"MP {mp_cost}"))
+
+        if has_rest:
+            def rest_action():
+                self.select_move("Rest")
+            tooltip = ""
+            try:
+                tooltip = Ability.get_attr("Rest", "INFO") or ""
+            except Exception:
+                pass
+            rect = (rest_x, card_y + btn_y_offset, REST_W, btn_h_total)
+            self.action_buttons.append(Button(rect, "Rest", rest_action, color=BUTTON_COLOR,
+                                                hover_color=BUTTON_HOVER, tooltip=tooltip))
 
     def select_move(self, move_name):
         if self.game_over:
@@ -364,19 +444,29 @@ class GameGUI:
     def cast_selected_ability(self, targets):
         if not self.selected_ability or not targets:
             return
-        self.selected_ability.initial_cast(targets, self.current_unit, self.battle)
-        # self.log(f"{self.current_unit} used {self.selected_ability.ABILITY_NAME}.")
-        # if self.selected_ability.AttrValDict["MP_COST"] > 0:
-        #     self.log(f"MP remaining: {self.current_unit.mp}/{self.current_unit.max_mp}")
+        self.action_locked = True
+        self._pending_hit_sound = None
+        cast_snd = self.sounds.get(self.selected_ability.ABILITY_NAME)
+        if cast_snd:
+            cast_snd.play()
+        success = self.selected_ability.initial_cast(targets, self.current_unit, self.battle)
+        if success is False:
+            miss_snd = self.sounds.get("miss")
+            if miss_snd:
+                miss_snd.play()
+        else:
+            dmg_type = self.selected_ability.AttrValDict.get("DMG_TYPE")
+            if dmg_type:
+                self._pending_hit_sound = {
+                    "dmg_type": dmg_type,
+                    "hit_type": self.selected_ability.AttrValDict.get("HIT_TYPE"),
+                    "damage": getattr(self.selected_ability, "last_damage_dealt", 0),
+                }
+                pygame.time.set_timer(HIT_SOUND_EVENT, 40, loops=1)
         self.battle.resolve_after_action(self.current_unit)
         Unit.downed(self.battle)
-        if self.current_unit and self.current_unit.team == 1 and self.enemy_ai_enabled:
-            self.draw_battle_screen()
-            pygame.event.pump()
-            time.sleep(1)
         self.log("")
-        self.current_index += 1
-        self.next_turn()
+        pygame.time.set_timer(NEXT_TURN_EVENT, 200, loops=1)
 
     def cancel_target_selection(self):
         self.selected_ability = None
@@ -415,22 +505,19 @@ class GameGUI:
         return random.choice(valid_moves) if valid_moves else None
 
     def execute_enemy_ai(self):
+        self.action_locked = True
         move_name = self.choose_ai_move()
         if move_name is None:
             self.log(f"{self.current_unit} cannot act.")
-            self.draw_battle_screen()
-            pygame.event.pump()
-            time.sleep(1)
-            self.log("")
-            self.current_index += 1
-            self.next_turn()
+            self.ai_pending_targets = []
+            pygame.time.set_timer(AI_CAST_EVENT, 200, loops=1)
             return
         self.selected_ability = Ability(move_name, Ability.ability_ID_counter)
         available_targets = self.resolve_available_targets(self.selected_ability)
         if self.selected_ability.AttrValDict["TARGET_TYPE"] == 1 and available_targets:
             available_targets = [random.choice(available_targets)]
-        # self.log(f"{self.current_unit} chooses {move_name}.")
-        self.cast_selected_ability(available_targets)
+        self.ai_pending_targets = available_targets
+        pygame.time.set_timer(AI_SHOW_EVENT, 600, loops=1)
 
     def draw_units(self, mouse_pos):
         player_units = Unit.get_units("alive", 0)
@@ -475,6 +562,8 @@ class GameGUI:
             border_color = (255, 215, 0)
         elif self.available_targets and unit in self.available_targets:
             border_color = (255, 215, 0)
+        if self.ai_targeted_units and unit in self.ai_targeted_units:
+            border_color = RED
         pygame.draw.rect(self.screen, border_color, rect, 2, border_radius=10)
 
         avatar_rect = pygame.Rect(x + 10, y + 10, 38, 38)
@@ -558,6 +647,8 @@ class GameGUI:
             if target_type in (2, 3, 4):
                 is_healing = self.hovered_ability_info.get("is_heal")
                 fill_color = (200, 255, 200) if is_healing else (255, 200, 200)
+        if self.ai_targeted_units and unit in self.ai_targeted_units:
+            fill_color = (255, 190, 190)
         return fill_color
 
     def draw_unit_tooltip(self, unit, mouse_pos):
@@ -690,8 +781,17 @@ class GameGUI:
             if self.selected_ability and self.available_targets:
                 selected_button = next((b for b in self.action_buttons if b.text == self.selected_ability.ABILITY_NAME), None)
                 if selected_button:
-                    back_rect = pygame.Rect(selected_button.rect.right + 12, selected_button.rect.y, 100, selected_button.rect.height)
-                    self.cancel_target_button = Button(back_rect, "BACK", self.cancel_target_selection, color=(200, 80, 80), hover_color=(220, 100, 100))
+                    BACK_SIZE = 30
+                    GAP = 5
+                    btn_cy = selected_button.rect.centery
+                    if self.current_unit and self.current_unit.team == 0:
+                        # Player: card-closest side is the left of the ability column
+                        bx = selected_button.rect.left - GAP - BACK_SIZE
+                    else:
+                        # Enemy: card-closest side is the right of the ability column
+                        bx = selected_button.rect.right + GAP
+                    back_rect = pygame.Rect(bx, btn_cy - BACK_SIZE // 2, BACK_SIZE, BACK_SIZE)
+                    self.cancel_target_button = Button(back_rect, "<", self.cancel_target_selection, color=(200, 80, 80), hover_color=(220, 100, 100))
                     self.cancel_target_button.update(mouse_pos)
                     self.cancel_target_button.draw(self.screen)
         elif self.state == 'team_select':
@@ -720,6 +820,54 @@ class GameGUI:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         self.running = False
+                    if event.type == HIT_SOUND_EVENT:
+                        pygame.time.set_timer(HIT_SOUND_EVENT, 0)
+                        info = self._pending_hit_sound
+                        self._pending_hit_sound = None
+                        if info:
+                            dmg = info["damage"]
+                            if dmg == 0:
+                                tier = "no_dmg"
+                            elif dmg <= HIT_DMG_LIGHT:
+                                tier = "light"
+                            elif dmg <= HIT_DMG_MEDIUM:
+                                tier = "medium"
+                            else:
+                                tier = "heavy"
+                            if tier:
+                                if info["dmg_type"] == "MAGIC":
+                                    key = f"hit_magic_{tier}"
+                                else:
+                                    hit_type = (info["hit_type"] or "blunt").lower()
+                                    key = f"hit_{hit_type}_{tier}"
+                                hit_snd = self.sounds.get(key)
+                                if hit_snd:
+                                    hit_snd.play()
+                    if event.type == AI_SHOW_EVENT:
+                        pygame.time.set_timer(AI_SHOW_EVENT, 0)
+                        if self.selected_ability:
+                            for button in self.action_buttons:
+                                if button.text == self.selected_ability.ABILITY_NAME:
+                                    button.color = RED
+                                    button.hover_color = (240, 110, 110)
+                                    break
+                        self.ai_targeted_units = list(self.ai_pending_targets or [])
+                        pygame.time.set_timer(AI_CAST_EVENT, 500, loops=1)
+                    if event.type == AI_CAST_EVENT:
+                        pygame.time.set_timer(AI_CAST_EVENT, 0)
+                        targets = self.ai_pending_targets
+                        self.ai_pending_targets = None
+                        self.ai_targeted_units = []
+                        if targets:
+                            self.cast_selected_ability(targets)
+                        else:
+                            self.log("")
+                            self.current_index += 1
+                            self.next_turn()
+                    if event.type == NEXT_TURN_EVENT:
+                        pygame.time.set_timer(NEXT_TURN_EVENT, 0)
+                        self.current_index += 1
+                        self.next_turn()
                     if event.type == pygame.MOUSEWHEEL and self.state == 'battle':
                         visible_height = 130
                         line_height = SMALL_FONT.get_linesize()
@@ -731,7 +879,7 @@ class GameGUI:
                                 for button in self.game_over_buttons:
                                     if button.rect.collidepoint(event.pos):
                                         button.click()
-                            elif self.selected_ability and self.available_targets:
+                            elif not self.action_locked and self.selected_ability and self.available_targets:
                                 if self.cancel_target_button and self.cancel_target_button.rect.collidepoint(event.pos):
                                     self.cancel_target_button.click()
                                 else:
@@ -743,7 +891,7 @@ class GameGUI:
                                         for button in self.action_buttons:
                                             if button.rect.collidepoint(event.pos):
                                                 button.click()
-                            elif not self.game_over:
+                            elif not self.action_locked and not self.game_over:
                                 for button in self.action_buttons:
                                     if button.rect.collidepoint(event.pos):
                                         button.click()

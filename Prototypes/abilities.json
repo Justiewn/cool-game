@@ -20,7 +20,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "Deal ATK(±2) damage to a target"
+      "INFO": "Deal ATK(±2) damage to a target",
+      "CAST_SOUND": "punch.mp3",
+      "HIT_TYPE": "BLUNT"
     },
     "Dagger Stab": {
       "TARGET_TYPE": 1,
@@ -42,7 +44,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "Deal ATK+3(±1) damage to a target"
+      "INFO": "Deal ATK+3(±1) damage to a target",
+      "CAST_SOUND": "dagger_stab.mp3",
+      "HIT_TYPE": "SHARP"
     },
     "Magic bolt": {
       "TARGET_TYPE": 1,
@@ -64,7 +68,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "Deal MAGIC(±1) magic damage to a target"
+      "INFO": "Deal MAGIC(±1) magic damage to a target",
+      "CAST_SOUND": "magic_bolt.mp3",
+      "HIT_TYPE": null
     },
     "Leech": {
       "TARGET_TYPE": 1,
@@ -86,7 +92,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "Steal HP from an enemy"
+      "INFO": "Steal HP from an enemy",
+      "CAST_SOUND": null,
+      "HIT_TYPE": null
     },
     "Rest": {
       "TARGET_TYPE": 0,
@@ -108,7 +116,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "Recover 5 HP and 5MP"
+      "INFO": "Recover 5 HP and 5MP",
+      "CAST_SOUND": "rest.mp3",
+      "HIT_TYPE": null
     },
     "First aid": {
       "TARGET_TYPE": 0,
@@ -130,7 +140,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "Recover 20 HP"
+      "INFO": "Recover 20 HP",
+      "CAST_SOUND": null,
+      "HIT_TYPE": null
     },
     "Heal": {
       "TARGET_TYPE": 1,
@@ -152,7 +164,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "Target ally will recover 20 HP"
+      "INFO": "Target ally will recover 20 HP",
+      "CAST_SOUND": "heal.mp3",
+      "HIT_TYPE": null
     },
     "Heal team": {
       "TARGET_TYPE": 3,
@@ -174,7 +188,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "All units in team recover 15 HP"
+      "INFO": "All units in team recover 15 HP",
+      "CAST_SOUND": "heal_team.mp3",
+      "HIT_TYPE": null
     },
     "Nuke": {
       "TARGET_TYPE": 4,
@@ -196,7 +212,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "All units are dealt 99 damage (+ ATK)"
+      "INFO": "All units are dealt 99 damage (+ ATK)",
+      "CAST_SOUND": null,
+      "HIT_TYPE": "BLUNT"
     },
     "Big kick": {
       "TARGET_TYPE": 3,
@@ -218,7 +236,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "All enemy units are dealt ATK ± 6 damage"
+      "INFO": "All enemy units are dealt ATK ± 6 damage",
+      "CAST_SOUND": null,
+      "HIT_TYPE": "BLUNT"
     },
     "Sharpen sword": {
       "TARGET_TYPE": 0,
@@ -240,7 +260,9 @@
       "BUFF_ENDS": 1,
       "BUFF_STACKS": 1,
       "BUFF_STATUS": "+ATK",
-      "INFO": "Increase own ATK by 10 for the next 2 turns"
+      "INFO": "Increase own ATK by 10 for the next 2 turns",
+      "CAST_SOUND": "sharpen_sword.mp3",
+      "HIT_TYPE": null
     },
     "Poison": {
       "TARGET_TYPE": 1,
@@ -262,7 +284,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 3,
       "BUFF_STATUS": "PSN",
-      "INFO": "Inflict minor initial damage and Poisoning them for the next 5 turns. Max 3 stacks. Additional stacks increase damage."
+      "INFO": "Inflict minor initial damage and Poisoning them for the next 5 turns. Max 3 stacks. Additional stacks increase damage.",
+      "CAST_SOUND": "poison_dart.mp3",
+      "HIT_TYPE": null
     },
     "Sword slash": {
       "TARGET_TYPE": 1,
@@ -284,7 +308,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "Deal ATK+5(±3) damage to a target"
+      "INFO": "Deal ATK+5(±3) damage to a target",
+      "CAST_SOUND": "sword_slash.mp3",
+      "HIT_TYPE": "SHARP"
     },
     "Raise shield": {
       "TARGET_TYPE": 0,
@@ -306,7 +332,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 1,
       "BUFF_STATUS": "+DEF",
-      "INFO": "+8 DEF by 8 until your next turn"
+      "INFO": "+8 DEF by 8 until your next turn",
+      "CAST_SOUND": "raise_shield.mp3",
+      "HIT_TYPE": null
     },
     "Feint": {
       "TARGET_TYPE": 0,
@@ -328,7 +356,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 1,
       "BUFF_STATUS": "+DODGE",
-      "INFO": "Increase your DODGE by 50% until the end of your next turn"
+      "INFO": "Increase your DODGE by 50% until the end of your next turn",
+      "CAST_SOUND": "feint.mp3",
+      "HIT_TYPE": null
     },
     "Taunt": {
       "TARGET_TYPE": 3,
@@ -350,7 +380,9 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 1,
       "BUFF_STATUS": "-DEF",
-      "INFO": "Decrease all enemy DEF by 5 for 2 turns"
+      "INFO": "Decrease all enemy DEF by 5 for 2 turns",
+      "CAST_SOUND": "taunt.mp3",
+      "HIT_TYPE": null
     },
     "Cleave": {
       "TARGET_TYPE": 3,
@@ -372,9 +404,11 @@
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 0,
       "BUFF_STATUS": null,
-      "INFO": "Deal ATK+3(±5) damage to all enemies"
+      "INFO": "Deal ATK+3(±5) damage to all enemies",
+      "CAST_SOUND": "cleave.mp3",
+      "HIT_TYPE": "SHARP"
     },
-    "War Cry": {
+    "Frenzy": {
       "TARGET_TYPE": 0,
       "TARGET_ENEMY": true,
       "TARGET_NUM": null,
@@ -393,8 +427,34 @@
       "BUFF_TRIGGER_ON": 0,
       "BUFF_ENDS": 0,
       "BUFF_STACKS": 1,
-      "BUFF_STATUS": "+ATK +CRIT",
-      "INFO": "+6 ATK and +15 CRIT for the next 3 turns"
+      "BUFF_STATUS": "+ATK +CRIT -DEF -DODGE",
+      "INFO": "+6 ATK and +15 CRIT, -3 DEF and -5 DODGE for the next 3 turns",
+      "CAST_SOUND": "frenzy.mp3",
+      "HIT_TYPE": null
+    },
+    "Exhaust": {
+      "TARGET_TYPE": 1,
+      "TARGET_ENEMY": true,
+      "TARGET_NUM": null,
+      "SPECIAL": true,
+      "LASTS": 4,
+      "CAN_DODGE": false,
+      "MP_COST": 5,
+      "DMG_TYPE": null,
+      "DMG_IS_PERCENT": false,
+      "DMG_BASE": 0,
+      "DMG_ROLL": 0,
+      "IS_HEAL": false,
+      "HP_GAIN": 0,
+      "MP_GAIN": 0,
+      "IS_BUFF": true,
+      "BUFF_TRIGGER_ON": 0,
+      "BUFF_ENDS": 0,
+      "BUFF_STACKS": 1,
+      "BUFF_STATUS": "-DEF -DODGE",
+      "INFO": "Decrease target enemy's ATK/DEF by 4 and DODGE by 10 for 3 turns",
+      "CAST_SOUND": "exhaust.mp3",
+      "HIT_TYPE": null
     }
   },
   "buffDict": {
@@ -402,6 +462,7 @@
     "Raise shield": [0, 0, 0, 8, 0, 0],
     "Feint": [0, 0, 0, 0, 0, 50],
     "Taunt": [0, 0, 0, -5, 0, 0],
-    "War Cry": [0, 0, 6, 0, 15, 0]
+    "Exhaust": [0, 0, -5, -5, 0, -10],
+    "Frenzy": [0, 0, 6, -3, 15, -5]
   }
 }

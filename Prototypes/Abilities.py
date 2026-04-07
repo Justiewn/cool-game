@@ -115,9 +115,10 @@ class Ability():
             'Raise shield': self.RaiseShield,
             'Feint':  self.Feint, 
             'Taunt' :  self.Taunt,
+            'Exhaust' :  self.Exhaust,
             "Poison": self.Poison ,
             "Leech": self.Leech,          
-            "War Cry": self.WarCry          
+            "Frenzy": self.Frenzy          
             }
 
 #========================================Class methods===========================================================================================
@@ -137,7 +138,7 @@ class Ability():
 
     #generic damage (no calculations) with message outputs and minimum damage of 0
     @classmethod
-    def damage_target(cls, final_damage, target, dmg_type):
+    def damage_target(cls, final_damage, target, dmg_type, is_crit=False):
         if dmg_type == "NORMAL":
             damage_message = "physical"
             blocked_message = "Their defence is too high!"
@@ -146,7 +147,10 @@ class Ability():
             blocked_message = "Their magic is too strong!"
         if final_damage > 0:                                #if there is damage,
             target.hp -= final_damage                             #target loses HP
-            print("{} took {} {} damage!".format(str(target), final_damage, damage_message))       
+            if is_crit:
+                print("Critical hit! {} took {} {} damage!".format(str(target), final_damage, damage_message))
+            else:
+                print("{} took {} {} damage!".format(str(target), final_damage, damage_message))       
         else:
             print("{} took no damage... {}".format(str(target), blocked_message))
 
@@ -215,6 +219,7 @@ class Ability():
     def initial_cast(self, target_list, caster, battle):
         self.target_list = target_list                            #store target_list and caster in ability instance
         self.caster = caster
+        self.last_damage_dealt = 0
         if self.AttrValDict["TARGET_TYPE"] == 1:
             print("{} used {} on {}!".format(caster.name, self.ABILITY_NAME, str(self.target_list[0])))
         else:
@@ -255,6 +260,7 @@ class Ability():
         if self.turns_left == 0 and self.AttrValDict["IS_BUFF"]:
             for target in self.target_list:
                 target.modify_buff_stack_dict("remove", self.AttrValDict["BUFF_STATUS"])
+        return success
 
     #if the ability is past its BUFF_STACKS limit, expire and remove the oldest instance of the same ability on the target
     def check_stacks(self, target, battle):
@@ -321,14 +327,13 @@ class Ability():
                     self.turns_left = 0     
             dmg_type = self.AttrValDict["DMG_TYPE"]                                                                #set turns_left to 0 to be deleted by check_Ability_queue()
             if dmg_type in ["NORMAL", "MAGIC"]:
-                if dmg_type == "NORMAL":
-                    raw_damage = self.calculate_dmg(caster, dmg_type)
-                    final_damage = self.calculate_def(raw_damage, target, dmg_type)
-                elif dmg_type == "MAGIC":
-                    raw_damage = self.calculate_dmg(caster, dmg_type)
-                    final_damage = self.calculate_def(raw_damage, target, dmg_type)
-                Ability.damage_target(final_damage, target, dmg_type)
-                
+                raw_damage = self.calculate_dmg(caster, dmg_type)
+                final_damage = self.calculate_def(raw_damage, target, dmg_type)
+                is_crit = random.random() < caster.CRIT / 100
+                if is_crit and final_damage > 0:
+                    final_damage = math.ceil(final_damage * 1.5)
+                Ability.damage_target(final_damage, target, dmg_type, is_crit)
+                self.last_damage_dealt = getattr(self, 'last_damage_dealt', 0) + max(0, final_damage)
             if self.AttrValDict["IS_HEAL"]:
                 hp_gain, mp_gain = self.calculate_heals(target)
                 Ability.heal_target(target, hp_gain, mp_gain)
@@ -337,6 +342,7 @@ class Ability():
             self.turns_left = 0                                                                     #set turns_left to 0 to be deleted by check_Ability_queue()
         if self.AttrValDict["IS_BUFF"]:                                             #return success to signal if check_stats should be called in initial_cast()
             return success
+        return success
 
     def calculate_dmg(self, caster, dmg_type):        #uses DMG_BASE, DMG_ROLL, and caster.ATK/caster.MAGIC to calculate and return raw_damage
         minDMG, maxDMG = (self.AttrValDict["DMG_BASE"] - self.AttrValDict["DMG_ROLL"],
@@ -474,9 +480,17 @@ class Ability():
         elif self.turns_left == 0:                                                           #reverse effects in last turn
             self.buff_stat_modifier("remove", target)
             print("{} regains his composure. His DEF returns to normal".format(str(target)))
+    #
+    def Exhaust(self, target, caster=None):                                                                                  
+        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
+            self.buff_stat_modifier("add", target)
+            print("{}'s ATK and DEF have decreased by 4 and DODGE by 10!".format(str(target)))
+        elif self.turns_left == 0:                                                           #reverse effects in last turn
+            self.buff_stat_modifier("remove", target)
+            print("{} regains his composure. His ATK, DEF, and DODGE return to normal.".format(str(target)))
 
     #
-    def WarCry(self, target, caster=None):                                                                                  
+    def Frenzy(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
             self.buff_stat_modifier("add", target)
             print("{}'s ATK has increased by 6 and CRIT has increased by 15!".format(str(target)))

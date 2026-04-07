@@ -494,10 +494,10 @@ class Unit_Thief(Unit):
         self.MAGIC = 2
         self.MAGIC_DEF = 2 
         self.CRIT = 25          # /100%
-        self.DODGE = 15          # /100%
+        self.DODGE = 10          # /100%
         self.SPEED = 16         # max speed is 20
 
-        self.movesList = ["Rest", "Dagger Stab", 'Feint', 'Poison', 'Taunt']
+        self.movesList = ["Rest", "Dagger Stab", 'Feint', 'Poison', 'Exhaust']
 
     def __str__(self):
         return self.name + " the " + Unit_Thief.className
@@ -545,10 +545,10 @@ class Unit_Berserker(Unit):
         self.MAGIC = 0
         self.MAGIC_DEF = 0 
         self.CRIT = 15          # /100%
-        self.DODGE = 2          # /100%
+        self.DODGE = 5          # /100%
         self.SPEED = 8         # max speed is 20
 
-        self.movesList = ["Rest", "Cleave", "War Cry", "Taunt"]
+        self.movesList = ["Rest", "Cleave", "Frenzy", "Taunt"]
 
     def __str__(self):
         return self.name + " the " + Unit_Berserker.className
