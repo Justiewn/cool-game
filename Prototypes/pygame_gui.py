@@ -196,7 +196,7 @@ class GameGUI:
         pygame.mixer.music.play()
 
     def load_sounds(self):
-        sounds_dir = os.path.join(os.path.dirname(__file__), "sounds")
+        sounds_dir = os.path.join(os.path.dirname(__file__), "sounds", "effects")
         for ability_name, attrs in Ability.AbilitiesDict.items():
             cast_sound = attrs.get("CAST_SOUND") if isinstance(attrs, dict) else None
             if cast_sound:
@@ -214,6 +214,11 @@ class GameGUI:
                 self.sounds[name] = pygame.mixer.Sound(path)
             except Exception:
                 pass
+        menu_click_path = os.path.join(os.path.dirname(__file__), "sounds", "menu_click.mp3")
+        try:
+            self.sounds["menu_click"] = pygame.mixer.Sound(menu_click_path)
+        except Exception:
+            pass
 
     def get_portrait_for_unit(self, unit):
         class_name = getattr(type(unit), "className", "Thug")
@@ -1032,21 +1037,39 @@ class GameGUI:
                                     if button.rect.collidepoint(event.pos):
                                         button.click()
                         elif self.state == 'team_select':
+                            _menu_click_played = False
                             for button in self.remove_slot_buttons:
                                 if button.rect.collidepoint(event.pos):
+                                    if not _menu_click_played and "menu_click" in self.sounds:
+                                        self.sounds["menu_click"].play()
+                                        _menu_click_played = True
                                     button.click()
                             for button in self.add_slot_buttons.values():
                                 if button.rect.collidepoint(event.pos):
+                                    if not _menu_click_played and "menu_click" in self.sounds:
+                                        self.sounds["menu_click"].play()
+                                        _menu_click_played = True
                                     button.click()
                             for button in self.selection_buttons:
                                 if button.rect.collidepoint(event.pos):
+                                    if not _menu_click_played and "menu_click" in self.sounds:
+                                        self.sounds["menu_click"].play()
+                                        _menu_click_played = True
                                     button.click()
                             for button in self.scenario_buttons:
                                 if button.rect.collidepoint(event.pos):
+                                    if not _menu_click_played and "menu_click" in self.sounds:
+                                        self.sounds["menu_click"].play()
+                                        _menu_click_played = True
                                     button.click()
                             if self.ai_toggle_button.rect.collidepoint(event.pos):
+                                if not _menu_click_played and "menu_click" in self.sounds:
+                                    self.sounds["menu_click"].play()
+                                    _menu_click_played = True
                                 self.ai_toggle_button.click()
                             if self.start_button.rect.collidepoint(event.pos):
+                                if not _menu_click_played and "menu_click" in self.sounds:
+                                    self.sounds["menu_click"].play()
                                 self.start_button.click()
 
                 if self.state == 'team_select':
