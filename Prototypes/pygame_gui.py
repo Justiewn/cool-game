@@ -35,6 +35,7 @@ AI_CAST_EVENT = pygame.USEREVENT + 1
 AI_SHOW_EVENT = pygame.USEREVENT + 2
 NEXT_TURN_EVENT = pygame.USEREVENT + 3
 HIT_SOUND_EVENT = pygame.USEREVENT + 4
+MUSIC_END_EVENT = pygame.USEREVENT + 5
 HIT_DMG_LIGHT = 14
 HIT_DMG_MEDIUM = 26
 FONT = pygame.font.SysFont("arial", 18)
@@ -98,6 +99,11 @@ class Button:
 class GameGUI:
     CLASS_OPTIONS = ['T', 'P', 'K', 'TH', 'B', 'A']
     CLASS_NAMES = {'T': 'Thug', 'P': 'Priest', 'K': 'Knight', 'TH': 'Thief', 'B': 'Berserker', 'A': 'Assassin'}
+    SCENARIOS = [
+        {"name": "Midnight Assassination", "player": ['A', 'A', 'A'], "enemy": ['K', 'K', 'K']},
+        {"name": "Holy Crusade",           "player": ['K', 'P', 'K'], "enemy": ['B', 'B', 'B']},
+        {"name": "Riot in the Capitol",        "player": ['K', 'K', 'K'], "enemy": ['T', 'T', 'T', 'T', 'T']},
+    ]
 
     def __init__(self):
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -119,6 +125,10 @@ class GameGUI:
         self.hovered_ability_button = None
         self.hovered_ability_info = {}
         self.cancel_target_button = None
+        self.active_scenario = None
+        self.scenario_buttons = []
+        self.remove_slot_buttons = []
+        self.add_slot_buttons = {}
         self.ai_targeted_units = []
         self.ai_pending_targets = None
         self.action_locked = False
@@ -134,11 +144,13 @@ class GameGUI:
         self.unit_portraits = self.load_unit_portraits()
         self.sounds = {}
         self.load_sounds()
+        self._bgm_folder = None
         self.original_print = builtins.print
         builtins.print = self._print_and_log
         self.setup_team_selection()
         self.game_over_buttons = []
         self._setup_game_over_buttons()
+        self.play_bgm('selection')
 
     def create_fallback_portrait(self):
         fallback = pygame.Surface((34, 34), pygame.SRCALPHA)
@@ -167,6 +179,21 @@ class GameGUI:
             except Exception:
                 portraits[class_name] = fallback
         return portraits
+
+    def play_bgm(self, folder):
+        print('test')
+        bgm_dir = os.path.join(os.path.dirname(__file__), "sounds", "bgm", folder)
+        if not os.path.isdir(bgm_dir):
+            return
+        tracks = [f for f in os.listdir(bgm_dir) if f.lower().endswith(('.mp3', '.ogg', '.wav'))]
+        if not tracks:
+            return
+        self._bgm_folder = folder
+        track = os.path.join(bgm_dir, random.choice(tracks))
+        pygame.mixer.music.load(track)
+        pygame.mixer.music.set_volume(0.5)
+        pygame.mixer.music.set_endevent(MUSIC_END_EVENT)
+        pygame.mixer.music.play()
 
     def load_sounds(self):
         sounds_dir = os.path.join(os.path.dirname(__file__), "sounds")
@@ -231,22 +258,80 @@ class GameGUI:
         self.log("Battle begins!")
 
     def setup_team_selection(self):
+        MAX_TEAM = 5
+        P_X, E_X = 80, 760
+        SLOT_W, SLOT_H, SLOT_SPACING, SLOT_Y = 220, 70, 90, 180
+
         self.selection_buttons.clear()
-        self.start_button = Button((430, 620, 240, 50), "START BATTLE", self.start_battle, color=GREEN)
-        self.ai_toggle_button = Button((430, 540, 240, 50), f"Enemy AI: {'ON' if self.enemy_ai_enabled else 'OFF'}", self.toggle_enemy_ai, color=BLUE)
+        self.remove_slot_buttons = []
+        self.add_slot_buttons = {}
+
+        self.start_button = Button((430, 690, 240, 50), "START BATTLE", self.start_battle, color=GREEN)
+        self.ai_toggle_button = Button((430, 630, 240, 50), f"Enemy AI: {'ON' if self.enemy_ai_enabled else 'OFF'}", self.toggle_enemy_ai, color=BLUE)
 
         for i in range(len(self.player_team)):
-            rect = (80, 180 + i * 90, 220, 70)
+            rect = (P_X, SLOT_Y + i * SLOT_SPACING, SLOT_W, SLOT_H)
             self.selection_buttons.append(Button(rect, "", self.make_class_cycle('player', i), color=LIGHT_GRAY, hover_color=(180, 180, 180)))
-
         for i in range(len(self.enemy_team)):
-            rect = (760, 180 + i * 90, 220, 70)
+            rect = (E_X, SLOT_Y + i * SLOT_SPACING, SLOT_W, SLOT_H)
             self.selection_buttons.append(Button(rect, "", self.make_class_cycle('enemy', i), color=LIGHT_GRAY, hover_color=(180, 180, 180)))
+
+        btn_cy_offset = (SLOT_H - 26) // 2
+        if len(self.player_team) > 1:
+            for i in range(len(self.player_team)):
+                rect = (P_X + SLOT_W + 4, SLOT_Y + i * SLOT_SPACING + btn_cy_offset, 22, 26)
+                self.remove_slot_buttons.append(Button(rect, "×", lambda i=i: self._remove_slot('player', i),
+                                                       color=(190, 80, 80), hover_color=(220, 100, 100)))
+        if len(self.enemy_team) > 1:
+            for i in range(len(self.enemy_team)):
+                rect = (E_X - 26, SLOT_Y + i * SLOT_SPACING + btn_cy_offset, 22, 26)
+                self.remove_slot_buttons.append(Button(rect, "×", lambda i=i: self._remove_slot('enemy', i),
+                                                       color=(190, 80, 80), hover_color=(220, 100, 100)))
+
+        if len(self.player_team) < MAX_TEAM:
+            add_y = SLOT_Y + len(self.player_team) * SLOT_SPACING
+            self.add_slot_buttons['player'] = Button((P_X, add_y, SLOT_W, 30), "+ Add unit",
+                                                     lambda: self._add_slot('player'),
+                                                     color=(80, 160, 80), hover_color=(100, 190, 100))
+        if len(self.enemy_team) < MAX_TEAM:
+            add_y = SLOT_Y + len(self.enemy_team) * SLOT_SPACING
+            self.add_slot_buttons['enemy'] = Button((E_X, add_y, SLOT_W, 30), "+ Add unit",
+                                                    lambda: self._add_slot('enemy'),
+                                                    color=(80, 160, 80), hover_color=(100, 190, 100))
+
+        self.scenario_buttons = []
+        for i, scenario in enumerate(self.SCENARIOS):
+            rect = (400, 200 + i * 65, 300, 48)
+            btn = Button(rect, scenario["name"], lambda s=scenario: self.apply_scenario(s),
+                         color=(90, 110, 160), hover_color=(115, 138, 190))
+            self.scenario_buttons.append(btn)
+
+    def apply_scenario(self, scenario):
+        if self.active_scenario is scenario:
+            self.player_team, self.enemy_team = self.enemy_team, self.player_team
+        else:
+            self.player_team = list(scenario["player"])
+            self.enemy_team = list(scenario["enemy"])
+            self.active_scenario = scenario
+        self.setup_team_selection()
+
+    def _add_slot(self, team_type):
+        team = self.player_team if team_type == 'player' else self.enemy_team
+        team.append('T')
+        self.active_scenario = None
+        self.setup_team_selection()
+
+    def _remove_slot(self, team_type, index):
+        team = self.player_team if team_type == 'player' else self.enemy_team
+        if len(team) > 1:
+            team.pop(index)
+            self.active_scenario = None
+            self.setup_team_selection()
 
     def _setup_game_over_buttons(self):
         self.game_over_buttons = [
-            Button((330, 340, 200, 50), "Replay", self.replay, color=GREEN),
-            Button((570, 340, 200, 50), "Reselect", self.go_to_selection, color=BLUE),
+            Button((330, 340, 200, 50), "Restart Battle", self.replay, color=GREEN),
+            Button((570, 340, 200, 50), "Go to Selection", self.go_to_selection, color=BLUE),
         ]
 
     def replay(self):
@@ -256,6 +341,7 @@ class GameGUI:
         self.game_over = False
         self.state = 'team_select'
         self.setup_team_selection()
+        self.play_bgm('selection')
 
     def make_class_cycle(self, team_type, index):
         def action():
@@ -266,6 +352,7 @@ class GameGUI:
             current = team[index]
             next_index = (self.CLASS_OPTIONS.index(current) + 1) % len(self.CLASS_OPTIONS)
             team[index] = self.CLASS_OPTIONS[next_index]
+            self.active_scenario = None
         return action
 
     def toggle_enemy_ai(self):
@@ -275,6 +362,7 @@ class GameGUI:
     def start_battle(self):
         self.setup_game()
         self.state = 'battle'
+        self.play_bgm('battle')
         self.current_team = 0
         self.current_index = 0
         self.current_unit = None
@@ -284,8 +372,9 @@ class GameGUI:
         self.next_turn()
 
     def log(self, message):
-        timestamp = time.strftime("%H:%M:%S")
-        self.message_log.append(f"[{timestamp}] {message}")
+        # timestamp = time.strftime("%H:%M:%S")
+        # self.message_log.append(f"[{timestamp}] {message}")
+        self.message_log.append(f"{message}")
         self.message_log = self.message_log[-50:]
         max_lines = 7
         if len(self.message_log) <= max_lines:
@@ -358,8 +447,9 @@ class GameGUI:
             unit_index = alive_team.index(self.current_unit)
         except ValueError:
             unit_index = 0
-        card_y = 30 + unit_index * 180
-        card_h = 160
+        max_total = max(Unit.num_units(0, "all"), Unit.num_units(1, "all"), 1)
+        spacing, card_h = self._get_slot_layout(max_total)
+        card_y = 30 + unit_index * spacing
         is_player = self.current_unit.team == 0
 
         ABILITY_W = 217
@@ -530,9 +620,17 @@ class GameGUI:
         self.ai_pending_targets = available_targets
         pygame.time.set_timer(AI_SHOW_EVENT, 600, loops=1)
 
+    def _get_slot_layout(self, team_size):
+        """Returns (spacing, card_h) sized to fit team_size cards above the log panel."""
+        spacing = min(180, 530 // max(team_size, 1))
+        card_h = max(90, spacing - 20)
+        return spacing, card_h
+
     def draw_units(self, mouse_pos):
         player_units = Unit.get_units("alive", 0)
         enemy_units = Unit.get_units("alive", 1)
+        max_total = max(Unit.num_units(0, "all"), Unit.num_units(1, "all"), 1)
+        spacing, card_h = self._get_slot_layout(max_total)
         x_start = 30
         y_start = 30
         hovered_unit = None
@@ -544,24 +642,24 @@ class GameGUI:
             hovered_ability_targets = self.get_available_targets_for_move(self.hovered_ability_button.text)
             self.hovered_ability_info = self.get_hovered_ability_info(self.hovered_ability_button.text)
         for index, unit in enumerate(player_units):
-            rect = pygame.Rect(x_start, y_start + index * 180, 300, 160)
+            rect = pygame.Rect(x_start, y_start + index * spacing, 300, card_h)
             fill = self.get_unit_card_fill(unit, rect, mouse_pos, hovered_ability_targets, available_hover_targets)
-            self.draw_unit_card(unit, x_start, y_start + index * 180, GREEN, fill, hovered_ability_targets)
+            self.draw_unit_card(unit, x_start, y_start + index * spacing, GREEN, fill, hovered_ability_targets, card_h)
             self.card_rects.append((rect, unit))
             if rect.collidepoint(mouse_pos):
                 hovered_unit = unit
         x_start = 760
         for index, unit in enumerate(enemy_units):
-            rect = pygame.Rect(x_start, y_start + index * 180, 300, 160)
+            rect = pygame.Rect(x_start, y_start + index * spacing, 300, card_h)
             fill = self.get_unit_card_fill(unit, rect, mouse_pos, hovered_ability_targets, available_hover_targets)
-            self.draw_unit_card(unit, x_start, y_start + index * 180, RED, fill, hovered_ability_targets)
+            self.draw_unit_card(unit, x_start, y_start + index * spacing, RED, fill, hovered_ability_targets, card_h)
             self.card_rects.append((rect, unit))
             if rect.collidepoint(mouse_pos):
                 hovered_unit = unit
         return hovered_unit
 
-    def draw_unit_card(self, unit, x, y, color, fill=None, hovered_ability_targets=None):
-        rect = pygame.Rect(x, y, 300, 160)
+    def draw_unit_card(self, unit, x, y, color, fill=None, hovered_ability_targets=None, card_h=160):
+        rect = pygame.Rect(x, y, 300, card_h)
         fill_color = fill if fill is not None else LIGHT_GRAY
         pygame.draw.rect(self.screen, fill_color, rect, border_radius=10)
         border_color = BLACK
@@ -577,30 +675,40 @@ class GameGUI:
             border_color = RED
         pygame.draw.rect(self.screen, border_color, rect, 2, border_radius=10)
 
-        avatar_rect = pygame.Rect(x + 10, y + 10, 38, 38)
-        pygame.draw.rect(self.screen, WHITE, avatar_rect, border_radius=5)
-        pygame.draw.rect(self.screen, BLACK, avatar_rect, 1, border_radius=5)
-        unit_portrait = self.get_portrait_for_unit(unit)
-        if unit_portrait is not None:
-            self.screen.blit(unit_portrait, (x + 12, y + 12))
+        show_avatar = card_h >= 110
+        if show_avatar:
+            avatar_rect = pygame.Rect(x + 10, y + 10, 38, 38)
+            pygame.draw.rect(self.screen, WHITE, avatar_rect, border_radius=5)
+            pygame.draw.rect(self.screen, BLACK, avatar_rect, 1, border_radius=5)
+            unit_portrait = self.get_portrait_for_unit(unit)
+            if unit_portrait is not None:
+                self.screen.blit(unit_portrait, (x + 12, y + 12))
+            name_x, name_y = x + 54, y + 16
+            content_y = y + 52
+        else:
+            name_x, name_y = x + 10, y + 6
+            content_y = y + 6 + FONT.get_linesize() + 4
 
         title = FONT.render(str(unit), True, BLACK)
-        self.screen.blit(title, (x + 54, y + 16))
+        self.screen.blit(title, (name_x, name_y))
 
-        mp_bar_width = int(280 * ( unit.max_mp / 100 ))
-
+        bar_h = max(14, min(20, card_h // 8))
+        mp_bar_width = int(280 * (unit.max_mp / 100))
         hp_ratio = unit.hp / unit.max_hp if unit.max_hp else 0
         mp_ratio = unit.mp / unit.max_mp if unit.max_mp else 0
-        hp_bar = pygame.Rect(x + 10, y + 52, int(280 * hp_ratio), 20)
-        mp_bar = pygame.Rect(x + 10, y + 76, int(mp_bar_width * mp_ratio), 20)
+        hp_y, mp_y = content_y, content_y + bar_h + 4
+        hp_bar = pygame.Rect(x + 10, hp_y, int(280 * hp_ratio), bar_h)
+        mp_bar = pygame.Rect(x + 10, mp_y, int(mp_bar_width * mp_ratio), bar_h)
         pygame.draw.rect(self.screen, RED, hp_bar, border_radius=2)
         pygame.draw.rect(self.screen, BLUE, mp_bar, border_radius=2)
-        pygame.draw.rect(self.screen, BLACK, (x + 10, y + 52, 280, 20), 2, border_radius=2)
-        pygame.draw.rect(self.screen, BLACK, (x + 10, y + 76, mp_bar_width, 20), 2, border_radius=2)
-        self.screen.blit(SMALL_FONT.render(f"{unit.hp}/{unit.max_hp}", True, BLACK), (x + 14, y + 54))
-        self.screen.blit(SMALL_FONT.render(f"{unit.mp}/{unit.max_mp}", True, BLACK), (x + 14, y + 78))
-        buff_text = ", ".join([f"{name} x{stacks}" if stacks > 1 else name for name, stacks in unit.buff_stacks_dict.items()])
-        self.screen.blit(SMALL_FONT.render(buff_text, True, BLACK), (x + 10, y + 110))
+        pygame.draw.rect(self.screen, BLACK, (x + 10, hp_y, 280, bar_h), 2, border_radius=2)
+        pygame.draw.rect(self.screen, BLACK, (x + 10, mp_y, mp_bar_width, bar_h), 2, border_radius=2)
+        self.screen.blit(SMALL_FONT.render(f"{unit.hp}/{unit.max_hp}", True, BLACK), (x + 14, hp_y + 1))
+        self.screen.blit(SMALL_FONT.render(f"{unit.mp}/{unit.max_mp}", True, BLACK), (x + 14, mp_y + 1))
+        buff_y = mp_y + bar_h + 4
+        if buff_y + SMALL_FONT.get_linesize() <= y + card_h - 2:
+            buff_text = ", ".join([f"{name} x{stacks}" if stacks > 1 else name for name, stacks in unit.buff_stacks_dict.items()])
+            self.screen.blit(SMALL_FONT.render(buff_text, True, BLACK), (x + 10, buff_y))
         return rect
 
     def draw_info_panel(self):
@@ -722,6 +830,20 @@ class GameGUI:
 
         info_text = "Click a slot to cycle through unit classes. Then press START BATTLE."
         draw_text(self.screen, info_text, pygame.Rect(250, 90, 600, 40), FONT, BLACK)
+
+        scenario_label = FONT.render("— Scenarios —", True, DARK_GRAY)
+        self.screen.blit(scenario_label, (WIDTH // 2 - scenario_label.get_width() // 2, 163))
+        for button in self.scenario_buttons:
+            button.update(mouse_pos)
+            button.draw(self.screen)
+
+        for button in self.remove_slot_buttons:
+            button.update(mouse_pos)
+            button.draw(self.screen)
+        for button in self.add_slot_buttons.values():
+            button.update(mouse_pos)
+            button.draw(self.screen)
+
         self.ai_toggle_button.update(mouse_pos)
         self.ai_toggle_button.draw(self.screen)
         self.start_button.update(mouse_pos)
@@ -831,6 +953,9 @@ class GameGUI:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         self.running = False
+                    if event.type == MUSIC_END_EVENT:
+                        if self._bgm_folder:
+                            self.play_bgm(self._bgm_folder)
                     if event.type == HIT_SOUND_EVENT:
                         pygame.time.set_timer(HIT_SOUND_EVENT, 0)
                         info = self._pending_hit_sound
@@ -907,7 +1032,16 @@ class GameGUI:
                                     if button.rect.collidepoint(event.pos):
                                         button.click()
                         elif self.state == 'team_select':
+                            for button in self.remove_slot_buttons:
+                                if button.rect.collidepoint(event.pos):
+                                    button.click()
+                            for button in self.add_slot_buttons.values():
+                                if button.rect.collidepoint(event.pos):
+                                    button.click()
                             for button in self.selection_buttons:
+                                if button.rect.collidepoint(event.pos):
+                                    button.click()
+                            for button in self.scenario_buttons:
                                 if button.rect.collidepoint(event.pos):
                                     button.click()
                             if self.ai_toggle_button.rect.collidepoint(event.pos):

@@ -43,19 +43,19 @@ class Unit:
         self.buff_stacks_dict = {}        #can only be modified by modify_buff_stack_dict, which is called at two points: in check_stack() and at ability expiration (in special method)
 
         self._hp = 100                    #cannot surpass max_hp (stops at max in setter method)
-        self._mp = 25                    #cannot surpass max_mp (stops at max in setter method)
+        self._mp = 15                    #cannot surpass max_mp (stops at max in setter method)
 
         self._max_hp = 100
-        self._max_mp = 25
+        self._max_mp = 15
         self._ATK = 10
-        self._DEF = 3            # dmg - defense = final dmg
+        self._DEF = 2            # dmg - defense = final dmg
         self._MAGIC = 0                                                                 #just magic and no magic_def? so high magic is ineffective against high magic
         self._MAGIC_DEF = 0            # magic dmg - magic defense = final dmg
-        self._CRIT = 10          # /100%
+        self._CRIT = 5          # /100%
         self._DODGE = 5          # /100%
-        self._SPEED = 12         # max speed is 20
+        self._SPEED = 10         # max speed is 20
 
-        self.movesList = ["Rest", "Punch", 'First aid']
+        self.movesList = ["Rest", "Punch", "Bandage", "Uproar"]
 
         self.target_Ability_queue = []                   #a list that contains all current abilities this unit is a target of
 
@@ -460,15 +460,15 @@ class Unit_Knight(Unit):
 
 
         self.max_hp = 100
-        self.max_mp = 20
+        self.max_mp = 18
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
-        self.mp = 20                    #cannot surpass max_mp (stops at max in setter method)
+        self.mp = 18                    #cannot surpass max_mp (stops at max in setter method)
 
         self.ATK = 18
         self.DEF = 8            # dmg - defense = final dmg
         self.MAGIC = 0
         self.MAGIC_DEF = 0 
-        self.CRIT = 10          # /100%
+        self.CRIT = 15          # /100%
         self.DODGE = 1          # /100%
         self.SPEED = 6         # max speed is 20
 
@@ -485,19 +485,19 @@ class Unit_Thief(Unit):
         super().__init__(name, team)
 
         self.max_hp = 100
-        self.max_mp = 30
+        self.max_mp = 25
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
-        self.mp = 30                    #cannot surpass max_mp (stops at max in setter method)
+        self.mp = 25                    #cannot surpass max_mp (stops at max in setter method)
 
-        self.ATK = 12
+        self.ATK = 11
         self.DEF = 3            # dmg - defense = final dmg
         self.MAGIC = 2
-        self.MAGIC_DEF = 2 
+        self.MAGIC_DEF = 6 
         self.CRIT = 20          # /100%
-        self.DODGE = 15          # /100%
+        self.DODGE = 10          # /100%
         self.SPEED = 16         # max speed is 20
 
-        self.movesList = ["Rest", "Dagger Stab", 'Sneak', 'Poison', 'Deceive']
+        self.movesList = ["Rest", "Shiv", 'Sneak', 'Deceive']
 
     def __str__(self):
         return self.name + " the " + Unit_Thief.className
@@ -510,9 +510,9 @@ class Unit_Priest(Unit):
         super().__init__(name, team)
 
         self.max_hp = 100
-        self.max_mp = 60
+        self.max_mp = 50
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
-        self.mp = 60                    #cannot surpass max_mp (stops at max in setter method)
+        self.mp = 50                    #cannot surpass max_mp (stops at max in setter method)
 
         self.ATK = 5
         self.DEF = 1            # dmg - defense = final dmg
@@ -522,7 +522,7 @@ class Unit_Priest(Unit):
         self.DODGE = 5          # /100%
         self.SPEED = 10         # max speed is 20
 
-        self.movesList = ["Rest", "Magic bolt", 'Heal', 'Heal team']
+        self.movesList = ["Rest", "Smite", 'Heal', 'Rejuvenation']
 
     def __str__(self):
         return self.name + " the " + Unit_Priest.className
@@ -540,11 +540,11 @@ class Unit_Berserker(Unit):
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
         self.mp = 20                    #cannot surpass max_mp (stops at max in setter method)
 
-        self.ATK = 15
-        self.DEF = 3            # dmg - defense = final dmg
+        self.ATK = 14
+        self.DEF = 5            # dmg - defense = final dmg
         self.MAGIC = 0
         self.MAGIC_DEF = 0 
-        self.CRIT = 15          # /100%
+        self.CRIT = 10          # /100%
         self.DODGE = 5          # /100%
         self.SPEED = 8         # max speed is 20
 
@@ -561,11 +561,11 @@ class Unit_Assassin(Unit):
         super().__init__(name, team)
 
         self.max_hp = 100
-        self.max_mp = 35
+        self.max_mp = 25
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
-        self.mp = 35                    #cannot surpass max_mp (stops at max in setter method)
+        self.mp = 25                    #cannot surpass max_mp (stops at max in setter method)
 
-        self.ATK = 14
+        self.ATK = 12
         self.DEF = 2            # dmg - defense = final dmg
         self.MAGIC = 0
         self.MAGIC_DEF = 0 
@@ -573,7 +573,7 @@ class Unit_Assassin(Unit):
         self.DODGE = 10          # /100%
         self.SPEED = 20         # max speed is 20
 
-        self.movesList = ["Rest", "Dagger Stab", 'Shroud', 'Mark', 'Finish']
+        self.movesList = ["Rest", "Stab/Backstab", 'Shroud', 'Mark', 'Poison']
 
     def __str__(self):
         return self.name + " the " + Unit_Assassin.className

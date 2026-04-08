@@ -1,68 +1,6 @@
 """
 All ability effects (except initial mana cost) will be handled here.
 Entering point into this class is through Unit.choose_move(), where an Abilityobject is created, and then its determine_targets() method is called
-
-Class methods:
-
-    - get_attr(skill_name, ATTRIBUTE_NAME): gets the index and returns the value of a skill's attribute
-    - check_Ability_queue(current_ability): removes expired abilities and procs active ones in the ability queue
-
-    ----unit stat-modifying class methods------------
-    - damage_target(damage_amount, target, dmg_type): damage (no calculations) with generic message outputs and minimum damage of 0
-    - heal_target(target, hp_gain, mp_gain): healing (no calculations) with generic message outputs with cap at target's max hp/mp
-
-
-Instance methods:
-
-    - y.build_AttrValDict(): populates this ability object's AttrValDict with its stats as key:value pairs
-    - y.determine_targets(caster): determines this ability's available targets to fill target_list (using select_target(target_team) if needed)
-    - y.initial_cast(target_list, caster): use cast_on_target(target, caster) for targets in target_list (also check_stacks(target) if ability is a buff), 
-                                            then check_Ability_queue(self) if there are any other abilites in queue
-    - y.check_stacks(target): checks the stacks of the ability on the target, makes sure stack limit is not breached (this is only called by cast_on_target() if ability was successful)
-    - y.select_target(target_team, caster):
-    - y.cast_on_target(target, caster): Actions the ability's effects on the target 
-
-    Instance (calculation) methods:
-        - y.calculate_dmg(caster): calculates damage range from DMG_BASE and DMG_ROLL, gets random damage from that range and calls damage_target()
-        - y.calculate_heals(target, caster)
-        - y.calculate_def(raw_damage, target)
-        - y.ability_dodged(target)
-
-All abilities should be declared in Ability_dict and should follow this format:
-    ( "NAME", [ ["TARGET_TYPE", "TARGET_ENEMY", "TARGET_NUM"], ["SPECIAL", "LASTS"], ["MP_COST"], ["DMG_TYPE", "DMG_IS_PERCENT", "DMG_BASE", "DMG_ROLL"], ["IS_HEAL", "HP_GAIN", "MP_GAIN"] ] )     #SUBJECT TO CHANGE ACCORDING TO THE NEEDS OF CREATED ABILITIES
-
-    TARGET [0]:
-        TARGET_TYPE [0]     - (int) 0 = self,       1 = single,     2 = multiple,   3 = team (units in the team will no be differentiated),   4 =  all (units will not be differentiated)
-        TARGET_ENEMY [1]    - (boolean) True if targets enemies, False if it targets allies (use x if TARGET_TYPE = self, all )
-        TARGET_NUM [2]      - (int) Number of targets to target if TARGET_TYPE = multiple (use x if otherwise)
-    OTHER [1]:      
-        SPECIAL [0]     - (int) 0 if only initial methods should be used, 1 if only a special method should be used, 2 if both initial and special methods should be used
-        LASTS [1]       - (int) Number of (caster) moves this ability will last for (0 for immediate expiration)
-        CAN_DODGE [2]   - (boolean) If ability can be dodged, True, else False
-    MP_COST [2]
-    DAMAGE [3]:           
-        DMG_TYPE [0]        - (boolean) "NORMAL" or "MAGIC" if move does initial damage, False otherwise and ignore rest of section
-        DMG_IS_PERCENT [2]  - (boolean)
-        DMG_BASE [1]        - (int) base damage of this ability. This is added onto the ATK of the unit
-        DMG_ROLL [2]        - (int) amount by which base damage may deviate each way, i.e. DMG_BASE ± DMG ROLL = Damage range (0 for no deviation) 
-    REGEN [4]:           
-        IS_HEAL [0]         - (bool) Uses any of this section means True, else False and ignore rest of section
-        HP_GAIN [1]         - (int) HP healed (0 for none)
-        MP_GAIN [2]         - (int) MP gained (0 for none)
-    BUFF [5]:
-        IS_BUFF [0]         - (bool) True if ability should be considered a buff, i.e. will be changing a unit's stats, False otherwise and ignore rest of section
-        BUFF_TRIGGER_ON [1] - (int) buff loses duration: 0 = per turn, 1 =  when attacked, 2=  when attacking 
-        BUFF_ENDS [ 2]      - (int) buff ends before or after caster move,  0 = before, 1 = after
-        BUFF_STACKS [3]     - (int) How many instances of this buff can exist on a target, (1 for no stacking, i.e. only one instance) 
-        BUFF_STATUS [4]     - (str) the string that is displayed to represent this buff
-        
-
-
-    If an abiltiy also has a buff/debuff effect which affects units' stats (TO ADD: or other mechanics that are popular), they should be put into specialDict:
-
-    ( "NAME",  [ {BUFFS} ] )
-
-    BUFFS [0]   - (dict of (stat(str):value(int))) A dict of all unit stat-modifying, with key being the stat, and value being the amount by which it changes
 """
 
 from collections import OrderedDict
@@ -71,6 +9,7 @@ import random
 from random import randint
 import math
 import json
+from Units import Unit
 
 # Load ability data from JSON file
 with open('abilities.json', 'r') as f:
@@ -111,7 +50,7 @@ class Ability():
 
         self.sp_val = None              #a place to store a value for this particular ability, e.g. target's DEF at time of casting
         
-        self.special_mapDict = { "Sharpen sword" :  self.IncreaseATK,
+        self.special_mapDict = { "Sharpen sword" :  self.SharpenSword,
             'Raise shield': self.RaiseShield,
             'Sneak':  self.Sneak, 
             'Shroud':  self.Shroud, 
@@ -122,7 +61,8 @@ class Ability():
             "Leech": self.Leech,          
             "Frenzy": self.Frenzy,
             "Mark": self.Mark,
-            "Finish": self.Finish,
+            "Stab/Backstab": self.StabBackstab,
+            "Uproar": self.Uproar,
             }
 
 #========================================Class methods===========================================================================================
@@ -231,10 +171,13 @@ class Ability():
 
         success = True
         buff_applied_to_any = False
+        target_sp_vals = {}
         for target in target_list:                      #for every target unit
             if self.AttrValDict["IS_BUFF"] and not self.check_stacks(target, battle):
                 continue
             target_success = self.cast_on_target(target, caster)
+            if isinstance(self.sp_val, dict):           # capture actual stat changes per target
+                target_sp_vals[id(target)] = dict(self.sp_val)
             if self.AttrValDict["IS_BUFF"] and target_success is None:
                 target.modify_buff_stack_dict("add", self.AttrValDict["BUFF_STATUS"])
                 buff_applied_to_any = True
@@ -256,6 +199,7 @@ class Ability():
                     per_target_effect.caster = caster
                     per_target_effect.target_list = [target]
                     per_target_effect.turns_left = self.turns_left
+                    per_target_effect.sp_val = target_sp_vals.get(id(target))  # copy actual changes
                     battle.register_effect(per_target_effect)
             else:
                 battle.register_effect(self)
@@ -349,13 +293,17 @@ class Ability():
         return success
 
     def calculate_dmg(self, caster, dmg_type):        #uses DMG_BASE, DMG_ROLL, and caster.ATK/caster.MAGIC to calculate and return raw_damage
-        minDMG, maxDMG = (self.AttrValDict["DMG_BASE"] - self.AttrValDict["DMG_ROLL"],
-                            self.AttrValDict["DMG_BASE"] + self.AttrValDict["DMG_ROLL"])
+        minDMG, maxDMG = self.calculate_ability_dmg_range()
         if dmg_type == "NORMAL":
             raw_damage = caster.ATK + randint(minDMG,maxDMG)
         elif dmg_type == "MAGIC":
             raw_damage = caster.MAGIC + randint(minDMG,maxDMG)
         return raw_damage
+
+    def calculate_ability_dmg_range(self):
+        minDMG, maxDMG = (self.AttrValDict["DMG_BASE"] - self.AttrValDict["DMG_ROLL"],
+                            self.AttrValDict["DMG_BASE"] + self.AttrValDict["DMG_ROLL"])
+        return minDMG, maxDMG
 
     def calculate_def(self, raw_damage, target, dmg_type):    #uses a damage value and target.DEF/target.MAGIC to calculate and return final_damage
         if dmg_type == "NORMAL":
@@ -391,40 +339,37 @@ class Ability():
     #uses values in buffDict to find which unit stats to change. Usually called twice: at initial buff, and revert at expiration
     def buff_stat_modifier(self, add_remove, target):
         buff_values = Ability.buffDict[self.ABILITY_NAME]
-        unit_stats = [target.max_hp, target.max_mp, target.ATK, target.DEF, target.CRIT, target.DODGE]          #HOW TO MAKE THIS WORK>>>>>>
-        for index in range(len(buff_values)):
-            if buff_values[index] != 0:
-                val_to_add = buff_values[index]
-                if add_remove == 'remove':
-                    val_to_add = -buff_values[index]            #if method was called to remove, make value negative
-                #print("This will be added: {}".format(val_to_add))                             #for debugging
-                if index == 0:
-                    target.max_hp += val_to_add
-                elif index == 1:
-                    target.max_mp += val_to_add  
-                elif index == 2:
-                    target.ATK += val_to_add   
-                elif index == 3:
-                    target.DEF += val_to_add    
-                elif index == 4:
-                    target.CRIT += val_to_add   
-                elif index == 5:
-                    target.DODGE += val_to_add       
+        stat_names = ['max_hp', 'max_mp', 'ATK', 'DEF', 'CRIT', 'DODGE']
+        if add_remove == 'add':
+            actual_changes = {}
+            for index in range(len(buff_values)):
+                if buff_values[index] != 0:
+                    before = getattr(target, stat_names[index])
+                    setattr(target, stat_names[index], before + buff_values[index])
+                    after = getattr(target, stat_names[index])
+                    actual_changes[index] = after - before   # may differ from buff_values[index] due to clamping
+            self.sp_val = actual_changes
+        else:
+            changes = self.sp_val if isinstance(self.sp_val, dict) else {}
+            for index in range(len(buff_values)):
+                if buff_values[index] != 0:
+                    actual = changes.get(index, buff_values[index])
+                    setattr(target, stat_names[index], getattr(target, stat_names[index]) - actual)
 
 #----------------------Special instance methods----------------------------------------------------
     #This section contains all methods used by abilities that have unique mechanics not covered by basic ones
     #
-    def IncreaseATK(self, target, caster=None):             
+    def SharpenSword(self, target, caster=None):             
         if self.turns_left == self.AttrValDict["LASTS"]:
             self.buff_stat_modifier("add", target)
-            print("{} whets his sword until it is razor sharp (ATK +10)".format(str(target)))
+            print("{} whets his sword until it is razor sharp (ATK +10 / CRIT +25)".format(str(target)))
         elif self.turns_left > 0:                                       #do nothing if in 2nd turn
             print("{}'s sword is still sharp".format(str(target)))
         elif self.turns_left == 0:                                     #reverse effects after last turn
             if self.AttrValDict["IS_BUFF"]:
                 if self.AttrValDict["BUFF_TRIGGER_ON"] == 0:     
                     self.buff_stat_modifier("remove", target)
-                    print("{}'s sword dulls (ATK -10)".format(str(target)))
+                    print("{}'s sword dulls (ATK -10 / CRIT -25)".format(str(target)))
 
     #
     def Leech(self, target, caster):
@@ -439,8 +384,8 @@ class Ability():
     #
     def Poison(self, target, caster=None):
         if self.turns_left == self.AttrValDict["LASTS"]:
-            self.sp_val = target.DEF
-            damage = self.AttrValDict["DMG_BASE"] - math.floor(self.sp_val / 2)
+            minDMG, maxDMG = self.calculate_ability_dmg_range()
+            damage = randint(minDMG,maxDMG) - math.floor(target.DEF)
             if damage <= 0:
                 print("The poison dart bounced off {}... their DEF is too high!".format(str(target)))
                 return False
@@ -448,7 +393,7 @@ class Ability():
             print("{} took {} damage from a poison dart!".format(str(target), damage))
         else:
             stacks = target.buff_stacks_dict.get(self.AttrValDict["BUFF_STATUS"], 1)
-            tick_damage = math.floor( 7 + (stacks - 1))
+            tick_damage = max(math.floor(target.hp * 0.15), 1)
             target.hp -= tick_damage
             print("{} took {} damage from poison!".format(str(target), tick_damage))
             if self.turns_left == 0:
@@ -471,7 +416,7 @@ class Ability():
     def Sneak(self, target, caster=None):                                                                                  # also in future it could mean value could vary with unit stats e.g. MAGIC
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast,
             self.buff_stat_modifier("add", target)
-            print("{}'s DODGE has increased by 40 and CRIT by 10!".format(str(target)))
+            print("{}'s DODGE has increased by 40 and CRIT by 80!".format(str(target)))
         elif self.turns_left == 0:                                                        #reverse effects in last turn
             self.buff_stat_modifier("remove", target)
             print("{} takes a steady stance. Their DODGE and CRIT return to normal.".format(str(target)))
@@ -479,7 +424,11 @@ class Ability():
     def Shroud(self, target, caster=None):                                                                                  # also in future it could mean value could vary with unit stats e.g. MAGIC
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast,
             self.buff_stat_modifier("add", target)
-            print("{}'s DODGE has increased by 70!".format(str(target)))
+            print("{}'s DODGE has increased by 60!".format(str(target)))
+
+            mp_gain = self.AttrValDict["MP_GAIN"]
+            Ability.heal_target(target, 0, mp_gain)
+
         elif self.turns_left == 0:                                                        #reverse effects in last turn
             self.buff_stat_modifier("remove", target)
             print("{} takes a steady stance. Their DODGE returns to normal.".format(str(target)))
@@ -492,14 +441,25 @@ class Ability():
         elif self.turns_left == 0:                                                           #reverse effects in last turn
             self.buff_stat_modifier("remove", target)
             print("{} regains his composure. His DEF returns to normal".format(str(target)))
+
+    #
+    def Uproar(self, target, caster=None):                                                                                  
+        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
+            self.buff_stat_modifier("add", target)
+            print("{}'s ATK increased by 2 and CRIT has increased by 5!".format(str(target)))
+        elif self.turns_left == 0:                                                           #reverse effects in last turn
+            self.buff_stat_modifier("remove", target)
+            print("{} regains his composure. His ATK and CRIT return to normal.".format(str(target)))
+
     #
     def Deceive(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
             self.buff_stat_modifier("add", target)
-            print("{}'s DEF has decreased by 5 and DODGE by 10!".format(str(target)))
+            print("{}'s DEF has decreased by 7 and DODGE by 15!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
             self.buff_stat_modifier("remove", target)
             print("{} regains his composure. His DEF and DODGE return to normal.".format(str(target)))
+
     #
     def Disquiet(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
@@ -521,31 +481,33 @@ class Ability():
     #
     def Mark(self, target, caster=None):
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, apply DEF penalty
-            target.DEF -= 4
-            print("{} has been Marked! Their DEF has decreased by 4!".format(str(target)))
+            before = target.DEF
+            target.DEF -= 6
+            self.sp_val = before - target.DEF   # actual amount deducted (handles DEF floor at 0)
+            print("{} has been Marked! Their DEF has decreased by {}!".format(str(target), self.sp_val))
         elif self.turns_left == 0:                                                        #reverse effect on expiry
-            target.DEF += 4
+            deducted = self.sp_val if self.sp_val is not None else 6
+            target.DEF += deducted
             print("{} is no longer Marked. Their DEF returns to normal.".format(str(target)))
 
     #
-    def Finish(self, target, caster):
-        if "MARKED" not in target.buff_stacks_dict:                             #can only be used on MARKED targets
-            print("{} is not Marked! Finish cannot be used on them.".format(str(target)))
-            return False
+    def StabBackstab(self, target, caster):
         raw_damage = self.calculate_dmg(caster, "NORMAL")
         final_damage = self.calculate_def(raw_damage, target, "NORMAL")
         is_crit = random.random() < caster.CRIT / 100
         if is_crit and final_damage > 0:
             final_damage = math.ceil(final_damage * 1.5)
+
+        bonus_damage = 0
+        if "MARKED" in target.buff_stacks_dict:                             #can only be used on MARKED targets
+            # print("{} is Marked! Sneak behind.".format(str(target)))
+            missing_hp = target.max_hp - target.hp
+            bonus_damage = math.floor(missing_hp * 0.2)
+
         Ability.damage_target(final_damage, target, "NORMAL", is_crit)
         self.last_damage_dealt = getattr(self, 'last_damage_dealt', 0) + max(0, final_damage)
-        missing_hp = target.max_hp - target.hp
-        bonus_damage = math.floor(missing_hp * 0.2)
         if bonus_damage > 0:
             target.hp -= bonus_damage
             self.last_damage_dealt += bonus_damage
-            print("{} takes an additional {} damage from their wounds!".format(str(target), bonus_damage))
+            print("{} takes an additional {} damage from a backstab!".format(str(target), bonus_damage))
         return True
-
-
-from Units import Unit, Unit_Knight, Unit_Thief, Unit_Priest
