@@ -245,7 +245,30 @@
       "CAST_SOUND": "heal_team.mp3",
       "HIT_TYPE": null
     },
-    
+    "Bless": {
+      "TARGET_TYPE": 3,
+      "TARGET_ENEMY": false,
+      "TARGET_NUM": null,
+      "SPECIAL": true,
+      "LASTS": 3,
+      "CAN_DODGE": false,
+      "MP_COST": 5,
+      "DMG_TYPE": null,
+      "DMG_IS_PERCENT": false,
+      "DMG_BASE": 0,
+      "DMG_ROLL": 0,
+      "IS_HEAL": false,
+      "HP_GAIN": 0,
+      "MP_GAIN": 0,
+      "IS_BUFF": true,
+      "BUFF_TRIGGER_ON": 0,
+      "BUFF_ENDS": 0,
+      "BUFF_STACKS": 1,
+      "BUFF_STATUS": "+DEF",
+      "INFO": "Team gains +4 DEF for the next 2 turns.",
+      "CAST_SOUND": "uproar.mp3",
+      "HIT_TYPE": null
+    },
 
     "Sword slash": {
       "TARGET_TYPE": 1,
@@ -328,7 +351,7 @@
       "SPECIAL": false,
       "LASTS": 0,
       "CAN_DODGE": true,
-      "MP_COST": 3,
+      "MP_COST": 4,
       "DMG_TYPE": "NORMAL",
       "DMG_IS_PERCENT": false,
       "DMG_BASE": 3,
@@ -575,6 +598,7 @@
     "Deceive": [0, 0, 0, -7, 0, -15],
     "Disquiet": [0, 0, -8, 0, -15, 0],
     "Frenzy": [0, 0, 6, -5, 15, -5],
-    "Uproar": [0, 0, 2, 0, 5, 0]
+    "Uproar": [0, 0, 2, 0, 5, 0],
+    "Bless": [0, 0, 0, 4, 0, 0]
   }
 }

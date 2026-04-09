@@ -63,6 +63,7 @@ class Ability():
             "Mark": self.Mark,
             "Stab/Backstab": self.StabBackstab,
             "Uproar": self.Uproar,
+            "Bless": self.Bless,
             }
 
 #========================================Class methods===========================================================================================
@@ -450,6 +451,14 @@ class Ability():
         elif self.turns_left == 0:                                                           #reverse effects in last turn
             self.buff_stat_modifier("remove", target)
             print("{} regains his composure. His ATK and CRIT return to normal.".format(str(target)))
+    #
+    def Bless(self, target, caster=None):                                                                                  
+        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
+            self.buff_stat_modifier("add", target)
+            print("{}'s DEF has increased by 4!".format(str(target)))
+        elif self.turns_left == 0:                                                           #reverse effects in last turn
+            self.buff_stat_modifier("remove", target)
+            print("{} regains his composure. His DEF returns to normal.".format(str(target)))
 
     #
     def Deceive(self, target, caster=None):                                                                                  

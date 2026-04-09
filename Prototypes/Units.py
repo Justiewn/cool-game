@@ -522,7 +522,7 @@ class Unit_Priest(Unit):
         self.DODGE = 5          # /100%
         self.SPEED = 10         # max speed is 20
 
-        self.movesList = ["Rest", "Smite", 'Heal', 'Rejuvenation']
+        self.movesList = ["Rest", "Smite", 'Heal', "Bless", 'Rejuvenation']
 
     def __str__(self):
         return self.name + " the " + Unit_Priest.className
