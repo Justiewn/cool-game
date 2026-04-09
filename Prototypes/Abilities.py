@@ -18,7 +18,7 @@ AbilitiesDict = ability_data['AbilitiesDict']
 
 class Ability():
     #ATTR_NAME_LIST and AbilitiesDict store data about abilities and how they work
-    ATTR_NAME_LIST = [["TARGET_TYPE", "TARGET_ENEMY", "TARGET_NUM"], ["SPECIAL", "LASTS", "CAN_DODGE"], ["MP_COST"], ["DMG_TYPE", "DMG_IS_PERCENT", "DMG_BASE", "DMG_ROLL"], ["IS_HEAL", "HP_GAIN", "MP_GAIN"], ["IS_BUFF", "BUFF_TRIGGER_ON", "BUFF_ENDS",  "BUFF_STACKS", "BUFF_STATUS"], ["INFO"]] 
+    ATTR_NAME_LIST = [["TARGET_TYPE", "TARGET_ENEMY", "TARGET_NUM"], ["SPECIAL", "LASTS", "CAN_DODGE"], ["MP_COST"], ["DMG_TYPE", "DMG_IS_PERCENT", "DMG_BASE", "DMG_ROLL"], ["IS_HEAL", "HP_GAIN", "MP_GAIN"], ["IS_EFFECT", "EFFECT_TICK_OWNER", "EFFECT_TICK_PHASE", "EFFECT_TRIGGERS_ON", "EFFECT_TICK_ON_HIT_ONLY", "EFFECT_STACKS", "EFFECT_STATUS"], ["TOOLTIP_INFO"]] 
     AbilitiesDict = AbilitiesDict  # Loaded from JSON
     x = None
     ability_ID_counter = 0
@@ -158,7 +158,7 @@ class Ability():
         self.initial_cast(target_list, caster, battle)
         return target_list
 
-    #sets the target_list and caster for this ability, takes MP_COST, displays 'used' output, and for every target in target_list, check buff_stacks if is a buff and cast_on_target(), then check_Ability_queue() if needed
+    #sets the target_list and caster for this ability, takes MP_COST, displays 'used' output, and for every target in target_list, check effect_stacks if is a effect and cast_on_target(), then check_Ability_queue() if needed
     def initial_cast(self, target_list, caster, battle):
         self.target_list = target_list                            #store target_list and caster in ability instance
         self.caster = caster
@@ -169,28 +169,37 @@ class Ability():
             print("{} used {}!".format(caster.name, self.ABILITY_NAME))
 
         success = True
-        buff_applied_to_any = False
+        effect_applied_to_any = False
         target_sp_vals = {}
+        target_results = {}
         for target in target_list:                      #for every target unit
-            if self.AttrValDict["IS_BUFF"] and not self.check_stacks(target, battle):
+            if self.AttrValDict["IS_EFFECT"] and not self.check_stacks(target, battle):
                 continue
             target_success = self.cast_on_target(target, caster)
+            target_results[id(target)] = target_success
             if isinstance(self.sp_val, dict):           # capture actual stat changes per target
                 target_sp_vals[id(target)] = dict(self.sp_val)
-            if self.AttrValDict["IS_BUFF"] and target_success is None:
-                target.modify_buff_stack_dict("add", self.AttrValDict["BUFF_STATUS"])
-                buff_applied_to_any = True
+            if self.AttrValDict["IS_EFFECT"] and target_success is None:
+                target.modify_effect_stack_dict("add", self.AttrValDict["EFFECT_STATUS"])
+                effect_applied_to_any = True
             if target_success is False:
                 success = False
 
-        if self.AttrValDict["IS_BUFF"]:
-            success = success and buff_applied_to_any
+        if self.AttrValDict["IS_EFFECT"]:
+            success = success and effect_applied_to_any
+
+        if self.AttrValDict.get("DMG_TYPE") in ("NORMAL", "MAGIC"):
+            hit_any = any(v is not False for v in target_results.values())
+            battle.resolve_on_attacking(caster, hit_any)
+            for target in target_list:
+                was_hit = target_results.get(id(target)) is not False
+                battle.resolve_on_attacked(target, was_hit)
 
         if success:
             caster.mp -= self.AttrValDict["MP_COST"]
 
         if self.turns_left > 0 and success:
-            if self.AttrValDict["IS_BUFF"] and len(target_list) > 1:
+            if self.AttrValDict["IS_EFFECT"] and len(target_list) > 1:
                 # Multi-target buffs/debuffs use one effect instance per target
                 # so each unit tracks duration independently.
                 for target in target_list:
@@ -203,21 +212,21 @@ class Ability():
             else:
                 battle.register_effect(self)
 
-        # for compatibility, support buff expiry after caster action if the ability has a delayed end
-        if self.turns_left == 0 and self.AttrValDict["IS_BUFF"] and success:
+        # for compatibility, support effect expiry after caster action if the ability has a delayed end
+        if self.turns_left == 0 and self.AttrValDict["IS_EFFECT"] and success:
             for target in self.target_list:
-                target.modify_buff_stack_dict("remove", self.AttrValDict["BUFF_STATUS"])
+                target.modify_effect_stack_dict("remove", self.AttrValDict["EFFECT_STATUS"])
         return success
 
-    #if the ability is past its BUFF_STACKS limit, expire and remove the oldest instance of the same ability on the target
+    #if the ability is past its EFFECT_STACKS limit, expire and remove the oldest instance of the same effect on the target
     def check_stacks(self, target, battle):
-        times_stackable = self.AttrValDict["BUFF_STACKS"]
-        buff_status = self.AttrValDict["BUFF_STATUS"]
-        current_stacks = target.buff_stacks_dict.get(buff_status, 0)
+        times_stackable = self.AttrValDict["EFFECT_STACKS"]
+        effect_status = self.AttrValDict["EFFECT_STATUS"]
+        current_stacks = target.effect_stacks_dict.get(effect_status, 0)
         if current_stacks >= times_stackable:
-            # Remove the oldest active effect with the same buff on this target
+            # Remove the oldest active effect with the same status on this target
             for old_effect in battle.active_effects:
-                if (old_effect.AttrValDict.get("BUFF_STATUS") == buff_status
+                if (old_effect.AttrValDict.get("EFFECT_STATUS") == effect_status
                         and target in old_effect.target_list):
                     old_effect.turns_left = 0
                     old_effect.cast_on_target(target, old_effect.caster)
@@ -268,8 +277,8 @@ class Ability():
             if self.AttrValDict["SPECIAL"]:              #put it first in order because ..
                 success = self.special_sorter(target, caster)                           
                 if success == None:                                                                     #if success == None (i.e. not False)
-                    if self.AttrValDict["IS_BUFF"] and self.turns_left == 0:                                     #if ability was buff AND ability is expiring,,
-                        target.modify_buff_stack_dict("remove", self.AttrValDict["BUFF_STATUS"])                    #remove this buff stack
+                    if self.AttrValDict["IS_EFFECT"] and self.turns_left == 0:                                     #if ability was an effect AND ability is expiring
+                        target.modify_effect_stack_dict("remove", self.AttrValDict["EFFECT_STATUS"])                    #remove this effect stack
                 elif success == False:                                                                  #elif move was unsuccessful
                     self.turns_left = 0     
             dmg_type = self.AttrValDict["DMG_TYPE"]                                                                #set turns_left to 0 to be deleted by check_Ability_queue()
@@ -287,7 +296,7 @@ class Ability():
         else:
             success = False  
             self.turns_left = 0                                                                     #set turns_left to 0 to be deleted by check_Ability_queue()
-        if self.AttrValDict["IS_BUFF"]:                                             #return success to signal if check_stats should be called in initial_cast()
+        if self.AttrValDict["IS_EFFECT"]:                                             #return success to signal if check_stats should be called in initial_cast()
             return success
         return success
 
@@ -318,7 +327,7 @@ class Ability():
 
     #if CAN_DODGE = True, do dodge calculation and return True if dodged, False if hit, else if CAN_DODGE = False, always return False (ability always hits)
     def ability_dodged(self, target):                       
-        if self.AttrValDict["IS_BUFF"] and self.turns_left != self.AttrValDict["LASTS"]:                #if it is a buff stack, it cannot be dodged
+        if self.AttrValDict["IS_EFFECT"] and self.turns_left != self.AttrValDict["LASTS"]:                #if it is an effect tick, it cannot be dodged
             return False
         if self.AttrValDict["CAN_DODGE"]:
             #print("Dodge is: {}".format(target.DODGE))                                 #for debugging
@@ -335,13 +344,12 @@ class Ability():
         else:
             print("special_sorter: ABILITY DOES NOT EXIST!!!!!!!!")             #for debugging
 
-    #uses BUFF_VALUES in AbilitiesDict to find which unit stats to change. Usually called twice: at initial buff, and revert at expiration
-    def buff_stat_modifier(self, add_remove, target):
-        buff_values = self.AttrValDict.get("BUFF_VALUES") or {}
-        stat_names = ['max_hp', 'max_mp', 'ATK', 'DEF', 'CRIT', 'DODGE']
+    #uses EFFECT_VALUES in AttrValDict to find which unit stats to change. Usually called twice: at initial cast, and revert at expiration
+    def effect_stat_modifier(self, add_remove, target):
+        effect_values = self.AttrValDict.get("EFFECT_VALUES") or {}
         if add_remove == 'add':
             actual_changes = {}
-            for stat, value in buff_values.items():
+            for stat, value in effect_values.items():
                 if value != 0:
                     before = getattr(target, stat)
                     setattr(target, stat, before + value)
@@ -350,7 +358,7 @@ class Ability():
             self.sp_val = actual_changes
         else:
             changes = self.sp_val if isinstance(self.sp_val, dict) else {}
-            for stat, value in buff_values.items():
+            for stat, value in effect_values.items():
                 if value != 0:
                     actual = changes.get(stat, value)
                     setattr(target, stat, getattr(target, stat) - actual)
@@ -360,12 +368,10 @@ class Ability():
     #
     def SharpenSword(self, target, caster=None):             
         if self.turns_left == self.AttrValDict["LASTS"]:
-            self.buff_stat_modifier("add", target)
+            self.effect_stat_modifier("add", target)
             print("{} whets his sword until it is razor sharp (ATK +10 / CRIT +25)".format(str(target)))
-        # elif self.turns_left > 0:                                       #do nothing if in 2nd turn
-            # print("{}'s sword is still sharp".format(str(target)))
         elif self.turns_left == 0:                                     #reverse effects after last turn
-            self.buff_stat_modifier("remove", target)
+            self.effect_stat_modifier("remove", target)
             print("{}'s sword dulls (ATK -10 / CRIT -25)".format(str(target)))
 
     #
@@ -389,7 +395,7 @@ class Ability():
             target.hp -= damage
             print("{} took {} damage from a poison dart!".format(str(target), damage))
         else:
-            stacks = target.buff_stacks_dict.get(self.AttrValDict["BUFF_STATUS"], 1)
+            stacks = target.effect_stacks_dict.get(self.AttrValDict["EFFECT_STATUS"], 1)
             tick_damage = max(math.floor(target.hp * 0.15), 1)
             target.hp -= tick_damage
             print("{} took {} damage from poison!".format(str(target), tick_damage))
@@ -403,84 +409,84 @@ class Ability():
     #
     def RaiseShield(self, target, caster=None):
         if self.turns_left == self.AttrValDict["LASTS"]:
-            self.buff_stat_modifier("add", target)
+            self.effect_stat_modifier("add", target)
             print("{}'s DEF has increased by 8!".format(str(target)))
         elif self.turns_left == 0:
-            self.buff_stat_modifier("remove", target)
+            self.effect_stat_modifier("remove", target)
             print("{} lowers their shield".format(str(target)))
 
     #
     def Sneak(self, target, caster=None):                                                                                  # also in future it could mean value could vary with unit stats e.g. MAGIC
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast,
-            self.buff_stat_modifier("add", target)
+            self.effect_stat_modifier("add", target)
             print("{}'s DODGE has increased by 40 and CRIT by 80!".format(str(target)))
         elif self.turns_left == 0:                                                        #reverse effects in last turn
-            self.buff_stat_modifier("remove", target)
+            self.effect_stat_modifier("remove", target)
             print("{} takes a steady stance. Their DODGE and CRIT return to normal.".format(str(target)))
     #
     def Shroud(self, target, caster=None):                                                                                  # also in future it could mean value could vary with unit stats e.g. MAGIC
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast,
-            self.buff_stat_modifier("add", target)
+            self.effect_stat_modifier("add", target)
             print("{}'s DODGE has increased by 60!".format(str(target)))
 
             mp_gain = self.AttrValDict["MP_GAIN"]
             Ability.heal_target(target, 0, mp_gain)
 
         elif self.turns_left == 0:                                                        #reverse effects in last turn
-            self.buff_stat_modifier("remove", target)
+            self.effect_stat_modifier("remove", target)
             print("{} takes a steady stance. Their DODGE returns to normal.".format(str(target)))
 
     #
     def Taunt(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
-            self.buff_stat_modifier("add", target)
+            self.effect_stat_modifier("add", target)
             print("{}'s DEF has decreased by 6!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
-            self.buff_stat_modifier("remove", target)
+            self.effect_stat_modifier("remove", target)
             print("{} regains his composure. His DEF returns to normal".format(str(target)))
 
     #
     def Uproar(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
-            self.buff_stat_modifier("add", target)
+            self.effect_stat_modifier("add", target)
             print("{}'s ATK increased by 2 and CRIT has increased by 5!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
-            self.buff_stat_modifier("remove", target)
+            self.effect_stat_modifier("remove", target)
             print("{} regains his composure. His ATK and CRIT return to normal.".format(str(target)))
     #
     def Bless(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
-            self.buff_stat_modifier("add", target)
+            self.effect_stat_modifier("add", target)
             print("{}'s DEF has increased by 4!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
-            self.buff_stat_modifier("remove", target)
+            self.effect_stat_modifier("remove", target)
             print("{} regains his composure. His DEF returns to normal.".format(str(target)))
 
     #
     def Deceive(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
-            self.buff_stat_modifier("add", target)
+            self.effect_stat_modifier("add", target)
             print("{}'s DEF has decreased by 7 and DODGE by 15!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
-            self.buff_stat_modifier("remove", target)
+            self.effect_stat_modifier("remove", target)
             print("{} regains his composure. His DEF and DODGE return to normal.".format(str(target)))
 
     #
     def Disquiet(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
-            self.buff_stat_modifier("add", target)
+            self.effect_stat_modifier("add", target)
             print("{}'s ATK and CRIT have decreased by 8 and 15!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
-            self.buff_stat_modifier("remove", target)
+            self.effect_stat_modifier("remove", target)
             print("{} regains his composure. His ATK and CRIT return to normal.".format(str(target)))
 
     #
     def Frenzy(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
-            self.buff_stat_modifier("add", target)
+            self.effect_stat_modifier("add", target)
             print("{}'s ATK has increased by 6 and CRIT has increased by 15!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
-            self.buff_stat_modifier("remove", target)
+            self.effect_stat_modifier("remove", target)
             print("{} calms. His ATK and CRIT return to normal.".format(str(target)))
 
     #
@@ -504,7 +510,7 @@ class Ability():
             final_damage = math.ceil(final_damage * 1.5)
 
         bonus_damage = 0
-        if "MARKED" in target.buff_stacks_dict:                             #can only be used on MARKED targets
+        if "MARKED" in target.effect_stacks_dict:                             #can only be used on MARKED targets
             # print("{} is Marked! Sneak behind.".format(str(target)))
             missing_hp = target.max_hp - target.hp
             bonus_damage = math.floor(missing_hp * 0.2)

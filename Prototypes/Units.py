@@ -14,8 +14,8 @@ Instance methods
     - x.display_moves(movesList): display the unit's list of moves, their MP cost, and info about their moves
     - x.mp_check(mp_required): checks if enough mana, if enough return True, else False
     - x.is_dead(): returns True if Unit has <0HP and changes x.alive = False. Else returns False
-    - x.display_buff_prompts(): displays prompts for buffs in buff_stacks_dict                              #needs work
-    - x.modify_buff_stack_dict(add_or_remove, buff_name): simple dict entry adder/remover used by ability.check_stacks and special methods (for removing buff on expiration)
+    - x.display_effect_prompts(): displays prompts for effects in effect_stacks_dict                              #needs work
+    - x.modify_effect_stack_dict(add_or_remove, effect_name): simple dict entry adder/remover used by ability.check_stacks and special methods (for removing effect on expiration)
 """
 import os
 import copy
@@ -40,7 +40,7 @@ class Unit:
         self.name = name
         self.team = team            #0= player , 1 = enemy
         self.alive = True       #use to determine if unit is allowed a move and is targetable
-        self.buff_stacks_dict = {}        #can only be modified by modify_buff_stack_dict, which is called at two points: in check_stack() and at ability expiration (in special method)
+        self.effect_stacks_dict = {}        #can only be modified by modify_effect_stack_dict, which is called at two points: in check_stack() and at ability expiration (in special method)
 
         self._hp = 100                    #cannot surpass max_hp (stops at max in setter method)
         self._mp = 15                    #cannot surpass max_mp (stops at max in setter method)
@@ -143,8 +143,8 @@ class Unit:
             status = " DOWN" if not unit.alive else ""
             print("        {:20} HP:{:3}/{:3}    MP:{:3}/{:3}{}  ".format(
                 str(unit), unit.hp, unit.max_hp, unit.mp, unit.max_mp, status), end='')
-            for buff, stacks in unit.buff_stacks_dict.items():
-                print(" " + buff, end='')
+            for effect, stacks in unit.effect_stacks_dict.items():
+                print(" " + effect, end='')
                 if stacks > 1:
                     print("x" + str(stacks), end='')
             print()
@@ -194,7 +194,7 @@ class Unit:
 
         if is_multiplayer:
             self.display_moves(self.movesList)
-            # self.display_buff_prompts()
+            # self.display_effect_prompts()
             while True:
                 print("> What would you like to do?")
                 try:
@@ -209,7 +209,7 @@ class Unit:
                 except ValueError:
                     print("Please enter a number between 1-{}\n".format(len(self.movesList)))
         else:
-            # self.display_buff_prompts()
+            # self.display_effect_prompts()
             move_name = self.movesList[1]
         current_Ability = Ability(move_name, Ability.ability_ID_counter)    #create Ability object
         target_list = current_Ability.determine_targets(self, battle, is_multiplayer)               #call ability's determine_targets
@@ -231,7 +231,7 @@ class Unit:
                 print("MP cost: {:<3}  ".format(mp_cost), end='')
             else:
                 print("No cost       ", end='')
-            print(Ability.get_attr(move, "INFO"))
+            print(Ability.get_attr(move, "TOOLTIP_INFO"))
             time.sleep(0.08)
 
     #checks if enough mana, if enough then return True, else False
@@ -248,34 +248,34 @@ class Unit:
             return True
         return False
 
-    def display_buff_prompts(self):
-        if not self.buff_stacks_dict:
+    def display_effect_prompts(self):
+        if not self.effect_stacks_dict:
             return
         print()
         prompts = []
-        for buff_name, stacks in self.buff_stacks_dict.items():
+        for effect_name, stacks in self.effect_stacks_dict.items():
             if stacks > 1:
-                prompts.append(f"{buff_name} x{stacks}")
+                prompts.append(f"{effect_name} x{stacks}")
             else:
-                prompts.append(buff_name)
+                prompts.append(effect_name)
         print(f"{str(self)} has active effects: {', '.join(prompts)}")
 
 
-    def modify_buff_stack_dict(self, add_or_remove, buff_name):
-        if add_or_remove == "add":                                      #if a buff needs to be added
-            if buff_name in self.buff_stacks_dict:                          #if buff entry exists, just add 1 to stack
-                self.buff_stacks_dict[buff_name] += 1
+    def modify_effect_stack_dict(self, add_or_remove, effect_name):
+        if add_or_remove == "add":                                      #if an effect needs to be added
+            if effect_name in self.effect_stacks_dict:                          #if effect entry exists, just add 1 to stack
+                self.effect_stacks_dict[effect_name] += 1
             else:                                                           #else create entry with 1 stack
-                self.buff_stacks_dict[buff_name] = 1
-        elif add_or_remove == "remove":                                 #if a buff needs to be removed
-            if buff_name in self.buff_stacks_dict:                          #if buff exists (double checking so no errors happen)
-                if self.buff_stacks_dict[buff_name] >= 2:                        #if there are at least 2 stacks remaining then remove one stack
-                    self.buff_stacks_dict[buff_name] -= 1
+                self.effect_stacks_dict[effect_name] = 1
+        elif add_or_remove == "remove":                                 #if an effect needs to be removed
+            if effect_name in self.effect_stacks_dict:                          #if effect exists (double checking so no errors happen)
+                if self.effect_stacks_dict[effect_name] >= 2:                        #if there are at least 2 stacks remaining then remove one stack
+                    self.effect_stacks_dict[effect_name] -= 1
                 else:                                                           #else there is only one, so remove the entry
-                    del self.buff_stacks_dict[buff_name]
+                    del self.effect_stacks_dict[effect_name]
             else:
                 pass
-                #print("no {} to delete in {}'s buff_stack_dict".format(buff_name, str(self)))               #for debugging
+                #print("no {} to delete in {}'s effect_stack_dict".format(effect_name, str(self)))               #for debugging
 
 #===================setters and getters for Unit object stats======================
     @property

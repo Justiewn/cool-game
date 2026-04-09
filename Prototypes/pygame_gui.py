@@ -157,13 +157,13 @@ class GameGUI:
         self.unit_portraits = self.load_unit_portraits()
         self.sounds = {}
         self.load_sounds()
-        self.unit_buff_rects = {}  # (unit, status) -> pill Rect
-        self.unit_buff_area_rects = {}  # unit -> bounding Rect of all pills
+        self.unit_effect_rects = {}  # (unit, status) -> pill Rect
+        self.unit_effect_area_rects = {}  # unit -> bounding Rect of all pills
         self.unit_header_rects = {}  # unit -> bounding Rect of avatar + name
-        self.buff_tooltip_map = {
-            attrs.get("BUFF_STATUS"): attrs.get("BUFF_TOOLTIP")
+        self.effect_tooltip_map = {
+            attrs.get("EFFECT_STATUS"): attrs.get("EFFECT_TOOLTIP")
             for attrs in Ability.AbilitiesDict.values()
-            if attrs.get("BUFF_STATUS") and attrs.get("BUFF_TOOLTIP")
+            if attrs.get("EFFECT_STATUS") and attrs.get("EFFECT_TOOLTIP")
         }
         self._bgm_folder = None
         self.original_print = builtins.print
@@ -502,6 +502,7 @@ class GameGUI:
         self.current_unit = alive_team[self.current_index]
         self.current_unit_target_team = 1 - self.current_team
         self.battle.resolve_turn_start(self.current_unit)
+        self.battle.resolve_before_action(self.current_unit)
         Unit.downed(self.battle)
         if self.is_battle_over():
             self.game_over = True
@@ -598,7 +599,7 @@ class GameGUI:
 
         if target_type in (1, 2, 3):
             if ability.ABILITY_NAME == "Finish":
-                team = [u for u in team if "MARKED" in u.buff_stacks_dict]
+                team = [u for u in team if "MARKED" in u.effect_stacks_dict]
             return team
         if target_type == 4:
             return Unit.get_units("alive", 0) + Unit.get_units("alive", 1)
@@ -627,6 +628,7 @@ class GameGUI:
                 }
                 pygame.time.set_timer(HIT_SOUND_EVENT, 40, loops=1)
         self.battle.resolve_after_action(self.current_unit)
+        self.battle.resolve_turn_end(self.current_unit)
         Unit.downed(self.battle)
         self.log("")
         pygame.time.set_timer(NEXT_TURN_EVENT, 200, loops=1)
@@ -784,33 +786,33 @@ class GameGUI:
         pygame.draw.rect(self.screen, BLACK, (x + 10, mp_y, mp_bar_width, bar_h), 2, border_radius=2)
         self.screen.blit(SMALL_FONT.render(f"{unit.hp}/{unit.max_hp}", True, BLACK), (x + 14, hp_y + 1))
         self.screen.blit(SMALL_FONT.render(f"{unit.mp}/{unit.max_mp}", True, BLACK), (x + 14, mp_y + 1))
-        buff_y_start = mp_y + bar_h + 6
-        buff_y = buff_y_start
+        effect_y_start = mp_y + bar_h + 6
+        effect_y = effect_y_start
         pill_h = SMALL_FONT.get_linesize() + 4
         pill_pad = 4
         pill_gap = 3
         pill_x = x + 10
-        # Clear old per-buff rects for this unit
-        for key in [k for k in self.unit_buff_rects if k[0] is unit]:
-            del self.unit_buff_rects[key]
-        self.unit_buff_area_rects.pop(unit, None)
-        if unit.buff_stacks_dict:
-            for status, stacks in unit.buff_stacks_dict.items():
+        # Clear old per-effect rects for this unit
+        for key in [k for k in self.unit_effect_rects if k[0] is unit]:
+            del self.unit_effect_rects[key]
+        self.unit_effect_area_rects.pop(unit, None)
+        if unit.effect_stacks_dict:
+            for status, stacks in unit.effect_stacks_dict.items():
                 label = f"{status} x{stacks}" if stacks > 1 else status
                 text_w = SMALL_FONT.size(label)[0]
                 pill_w = text_w + pill_pad * 2
                 if pill_x + pill_w > x + card_w - 10:
                     pill_x = x + 10
-                    buff_y += pill_h + 2
-                if buff_y + pill_h > y + card_h - 2:
+                    effect_y += pill_h + 2
+                if effect_y + pill_h > y + card_h - 2:
                     break
-                pill_rect = pygame.Rect(pill_x, buff_y, pill_w, pill_h)
+                pill_rect = pygame.Rect(pill_x, effect_y, pill_w, pill_h)
                 pygame.draw.rect(self.screen, DARK_GRAY, pill_rect, border_radius=3)
-                self.screen.blit(SMALL_FONT.render(label, True, WHITE), (pill_x + pill_pad, buff_y + 2))
-                self.unit_buff_rects[(unit, status)] = pill_rect
+                self.screen.blit(SMALL_FONT.render(label, True, WHITE), (pill_x + pill_pad, effect_y + 2))
+                self.unit_effect_rects[(unit, status)] = pill_rect
                 pill_x += pill_w + pill_gap
             # bounding box covering entire pill area
-            self.unit_buff_area_rects[unit] = pygame.Rect(x + 10, buff_y_start, bar_w, buff_y + pill_h - buff_y_start)
+            self.unit_effect_area_rects[unit] = pygame.Rect(x + 10, effect_y_start, bar_w, effect_y + pill_h - effect_y_start)
         return rect
 
     def draw_info_panel(self):
@@ -903,7 +905,7 @@ class GameGUI:
         lines = []
         try:
             attrs = Ability.AbilitiesDict.get(ability_name, {})
-            info = attrs.get("INFO", "")
+            info = attrs.get("TOOLTIP_INFO", "")
             if info:
                 lines.append(info)
             dmg_type = attrs.get("DMG_TYPE")
@@ -924,23 +926,23 @@ class GameGUI:
             mp_gain = attrs.get("MP_GAIN", 0)
             if mp_gain:
                 lines.append(f"MP: +{mp_gain}")
-            buff_tooltip = attrs.get("BUFF_TOOLTIP")
-            if buff_tooltip:
-                lines.append(buff_tooltip)
+            effect_tooltip = attrs.get("EFFECT_TOOLTIP")
+            if effect_tooltip:
+                lines.append(effect_tooltip)
             lasts = attrs.get("LASTS", 0)
             if lasts:
                 lines.append(f"Duration: {lasts - 1} turns")
-            buff_stacks = attrs.get("BUFF_STACKS", 0)
-            if buff_stacks > 1:
-                lines.append(f"Max stacks: {buff_stacks}")
+            effect_stacks = attrs.get("EFFECT_STACKS", 0)
+            if effect_stacks > 1:
+                lines.append(f"Max stacks: {effect_stacks}")
         except Exception:
             pass
         return lines
 
-    def get_hovered_buff_tooltip(self, mouse_pos):
-        for (unit, status), pill_rect in self.unit_buff_rects.items():
+    def get_hovered_effect_tooltip(self, mouse_pos):
+        for (unit, status), pill_rect in self.unit_effect_rects.items():
             if pill_rect.collidepoint(mouse_pos):
-                tip = self.buff_tooltip_map.get(status)
+                tip = self.effect_tooltip_map.get(status)
                 if tip:
                     return f"{tip}"
         return None
@@ -1072,11 +1074,11 @@ class GameGUI:
         hovered_unit = self.draw_units(mouse_pos)
         self.draw_info_panel()
         if not self.paused:
-            mouse_over_buff_area = any(r.collidepoint(mouse_pos) for r in self.unit_buff_area_rects.values())
-            buff_tooltip = self.get_hovered_buff_tooltip(mouse_pos)
-            if buff_tooltip:
-                self.draw_ability_tooltip(buff_tooltip, mouse_pos)
-            elif hovered_unit and not mouse_over_buff_area:
+            mouse_over_effect_area = any(r.collidepoint(mouse_pos) for r in self.unit_effect_area_rects.values())
+            effect_tooltip = self.get_hovered_effect_tooltip(mouse_pos)
+            if effect_tooltip:
+                self.draw_ability_tooltip(effect_tooltip, mouse_pos)
+            elif hovered_unit and not mouse_over_effect_area:
                 header = self.unit_header_rects.get(hovered_unit)
                 if header and header.collidepoint(mouse_pos):
                     self.draw_unit_tooltip(hovered_unit, mouse_pos)
