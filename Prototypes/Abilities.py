@@ -15,13 +15,11 @@ from Units import Unit
 with open('abilities.json', 'r') as f:
     ability_data = json.load(f)
 AbilitiesDict = ability_data['AbilitiesDict']
-buffDict = ability_data['buffDict']
 
 class Ability():
     #ATTR_NAME_LIST and AbilitiesDict store data about abilities and how they work
     ATTR_NAME_LIST = [["TARGET_TYPE", "TARGET_ENEMY", "TARGET_NUM"], ["SPECIAL", "LASTS", "CAN_DODGE"], ["MP_COST"], ["DMG_TYPE", "DMG_IS_PERCENT", "DMG_BASE", "DMG_ROLL"], ["IS_HEAL", "HP_GAIN", "MP_GAIN"], ["IS_BUFF", "BUFF_TRIGGER_ON", "BUFF_ENDS",  "BUFF_STACKS", "BUFF_STATUS"], ["INFO"]] 
     AbilitiesDict = AbilitiesDict  # Loaded from JSON
-    buffDict = buffDict  # Loaded from JSON
     x = None
     ability_ID_counter = 0
 
@@ -337,25 +335,25 @@ class Ability():
         else:
             print("special_sorter: ABILITY DOES NOT EXIST!!!!!!!!")             #for debugging
 
-    #uses values in buffDict to find which unit stats to change. Usually called twice: at initial buff, and revert at expiration
+    #uses BUFF_VALUES in AbilitiesDict to find which unit stats to change. Usually called twice: at initial buff, and revert at expiration
     def buff_stat_modifier(self, add_remove, target):
-        buff_values = Ability.buffDict[self.ABILITY_NAME]
+        buff_values = self.AttrValDict.get("BUFF_VALUES") or {}
         stat_names = ['max_hp', 'max_mp', 'ATK', 'DEF', 'CRIT', 'DODGE']
         if add_remove == 'add':
             actual_changes = {}
-            for index in range(len(buff_values)):
-                if buff_values[index] != 0:
-                    before = getattr(target, stat_names[index])
-                    setattr(target, stat_names[index], before + buff_values[index])
-                    after = getattr(target, stat_names[index])
-                    actual_changes[index] = after - before   # may differ from buff_values[index] due to clamping
+            for stat, value in buff_values.items():
+                if value != 0:
+                    before = getattr(target, stat)
+                    setattr(target, stat, before + value)
+                    after = getattr(target, stat)
+                    actual_changes[stat] = after - before   # may differ from value due to clamping
             self.sp_val = actual_changes
         else:
             changes = self.sp_val if isinstance(self.sp_val, dict) else {}
-            for index in range(len(buff_values)):
-                if buff_values[index] != 0:
-                    actual = changes.get(index, buff_values[index])
-                    setattr(target, stat_names[index], getattr(target, stat_names[index]) - actual)
+            for stat, value in buff_values.items():
+                if value != 0:
+                    actual = changes.get(stat, value)
+                    setattr(target, stat, getattr(target, stat) - actual)
 
 #----------------------Special instance methods----------------------------------------------------
     #This section contains all methods used by abilities that have unique mechanics not covered by basic ones
@@ -364,13 +362,11 @@ class Ability():
         if self.turns_left == self.AttrValDict["LASTS"]:
             self.buff_stat_modifier("add", target)
             print("{} whets his sword until it is razor sharp (ATK +10 / CRIT +25)".format(str(target)))
-        elif self.turns_left > 0:                                       #do nothing if in 2nd turn
-            print("{}'s sword is still sharp".format(str(target)))
+        # elif self.turns_left > 0:                                       #do nothing if in 2nd turn
+            # print("{}'s sword is still sharp".format(str(target)))
         elif self.turns_left == 0:                                     #reverse effects after last turn
-            if self.AttrValDict["IS_BUFF"]:
-                if self.AttrValDict["BUFF_TRIGGER_ON"] == 0:     
-                    self.buff_stat_modifier("remove", target)
-                    print("{}'s sword dulls (ATK -10 / CRIT -25)".format(str(target)))
+            self.buff_stat_modifier("remove", target)
+            print("{}'s sword dulls (ATK -10 / CRIT -25)".format(str(target)))
 
     #
     def Leech(self, target, caster):
