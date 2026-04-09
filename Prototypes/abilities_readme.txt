@@ -14,13 +14,10 @@ False = targets allies (use x if TARGET_TYPE = self, all )
 TARGET_NUM  (int) 
 Number of targets if TARGET_TYPE = multiple
 
-SPECIAL (int) 
-0 = only initial methods
+IS_SPECIAL (int) 
+0 = only generic methods
 1 = only a special method
-2 = both initial and special methods should be used
-
-LASTS (int) 
-Number of (caster) moves this ability will last for (0 for immediate expiration)
+2 = both generic and special methods should be used
 
 CAN_DODGE (boolean) 
 If ability can be dodged, True, else False
@@ -48,18 +45,22 @@ MP_GAIN (int) MP gained (0 for none)
 
 IS_EFFECT (bool) 
 
-EFFECT_TICK_OWNER (int) 
-0 = effect ticks on the target's turn, 1 = effect ticks on the caster's turn
-Only applies when EFFECT_TRIGGERS_ON = 0
+TICKS (int) 
+Number of (caster) moves this ability will last for (0 for immediate expiration)
 
-EFFECT_TICK_PHASE (int)
-0 = tick fires at the start of the relevant turn, 1 = tick fires at the end of the relevant turn
 
 EFFECT_TRIGGERS_ON (int)
 0 = effect loses a tick per turn (governed by EFFECT_TICK_OWNER + EFFECT_TICK_PHASE)
 1 = effect loses a tick when the target is attacked
 2 = effect loses a tick when the target attacks
 3 = effect loses a tick when the target is attacked OR attacks
+
+EFFECT_TICK_OWNER (int) 
+0 = effect ticks on the target's turn, 1 = effect ticks on the caster's turn
+Only applies when EFFECT_TRIGGERS_ON = 0
+
+EFFECT_TICK_PHASE (int)
+0 = tick fires at the start of the relevant turn, 1 = tick fires at the end of the relevant turn
 
 EFFECT_TICK_ON_HIT_ONLY (bool)
 Only applies when EFFECT_TRIGGERS_ON >= 1

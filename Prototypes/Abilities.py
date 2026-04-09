@@ -3,7 +3,6 @@ All ability effects (except initial mana cost) will be handled here.
 Entering point into this class is through Unit.choose_move(), where an Abilityobject is created, and then its determine_targets() method is called
 """
 
-from collections import OrderedDict
 import time
 import random
 from random import randint
@@ -17,23 +16,12 @@ with open('abilities.json', 'r') as f:
 AbilitiesDict = ability_data['AbilitiesDict']
 
 class Ability():
-    #ATTR_NAME_LIST and AbilitiesDict store data about abilities and how they work
-    ATTR_NAME_LIST = [["TARGET_TYPE", "TARGET_ENEMY", "TARGET_NUM"], ["SPECIAL", "LASTS", "CAN_DODGE"], ["MP_COST"], ["DMG_TYPE", "DMG_IS_PERCENT", "DMG_BASE", "DMG_ROLL"], ["IS_HEAL", "HP_GAIN", "MP_GAIN"], ["IS_EFFECT", "EFFECT_TICK_OWNER", "EFFECT_TICK_PHASE", "EFFECT_TRIGGERS_ON", "EFFECT_TICK_ON_HIT_ONLY", "EFFECT_STACKS", "EFFECT_STATUS"], ["TOOLTIP_INFO"]] 
     AbilitiesDict = AbilitiesDict  # Loaded from JSON
-    x = None
     ability_ID_counter = 0
 
     @classmethod
     def _normalize_ability_entry(cls, ability_definition):
-        if isinstance(ability_definition, dict):
-            return ability_definition.copy()
-
-        normalized = {}
-        for group_index, attr_names in enumerate(cls.ATTR_NAME_LIST):
-            group_values = ability_definition[group_index] if group_index < len(ability_definition) else []
-            for attr_index, attr_name in enumerate(attr_names):
-                normalized[attr_name] = group_values[attr_index] if attr_index < len(group_values) else None
-        return normalized
+        return ability_definition.copy()
 
     def __init__(self, ability_name, ability_ID):       
 
@@ -44,30 +32,13 @@ class Ability():
         self.target_list = None                                                                      #the target of this ability
         self.caster = None                                                                      #the one using this ability, used in helping determine if it's a players turn
         self.AttrValDict = self.build_AttrValDict()
-        self.turns_left = self.AttrValDict["LASTS"]
+        self.turns_left = self.AttrValDict["TICKS"]
 
         self.sp_val = None              #a place to store a value for this particular ability, e.g. target's DEF at time of casting
-        
-        self.special_mapDict = { "Sharpen sword" :  self.SharpenSword,
-            'Raise shield': self.RaiseShield,
-            'Sneak':  self.Sneak, 
-            'Shroud':  self.Shroud, 
-            'Taunt' :  self.Taunt,
-            'Deceive' :  self.Deceive,
-            'Disquiet' :  self.Disquiet,
-            "Poison": self.Poison ,
-            "Leech": self.Leech,          
-            "Frenzy": self.Frenzy,
-            "Mark": self.Mark,
-            "Stab/Backstab": self.StabBackstab,
-            "Uproar": self.Uproar,
-            "Bless": self.Bless,
-            }
 
 #========================================Class methods===========================================================================================
-    #Uses ATTR_NAME_LIST and ability_dict to get an index and then value of (skill_name, ATTRIBUTE_NAME)
-    #this is used when an Ability object is not refered to directly, e.g. getting MP for Unit.display_moves()
-    
+    #Uses AbilitiesDict to get an attribute value for a named ability.
+    #This is used when an Ability object is not referred to directly, e.g. getting MP for Unit.display_moves()
     @classmethod
     def get_attr(cls, skill_name, ATTRIBUTE_NAME):
         try:
@@ -274,7 +245,7 @@ class Ability():
     def cast_on_target(self, target, caster):          
         success = None
         if not self.ability_dodged(target):                                 #if abiltiy hits (i.e. ability_dodged = False)
-            if self.AttrValDict["SPECIAL"]:              #put it first in order because ..
+            if self.AttrValDict["IS_SPECIAL"]:              #put it first in order because ..
                 success = self.special_sorter(target, caster)                           
                 if success == None:                                                                     #if success == None (i.e. not False)
                     if self.AttrValDict["IS_EFFECT"] and self.turns_left == 0:                                     #if ability was an effect AND ability is expiring
@@ -327,7 +298,7 @@ class Ability():
 
     #if CAN_DODGE = True, do dodge calculation and return True if dodged, False if hit, else if CAN_DODGE = False, always return False (ability always hits)
     def ability_dodged(self, target):                       
-        if self.AttrValDict["IS_EFFECT"] and self.turns_left != self.AttrValDict["LASTS"]:                #if it is an effect tick, it cannot be dodged
+        if self.AttrValDict["IS_EFFECT"] and self.turns_left != self.AttrValDict["TICKS"]:                #if it is an effect tick, it cannot be dodged
             return False
         if self.AttrValDict["CAN_DODGE"]:
             #print("Dodge is: {}".format(target.DODGE))                                 #for debugging
@@ -336,13 +307,13 @@ class Ability():
                 return True
         return False
 
-    #abilities with SPECIAL access this method to get to their special method, using special_mapDict
+    #abilities with IS_SPECIAL look up their method by ability name: strip '/', title-case, remove spaces
     def special_sorter(self, target, caster):
-        if self.ABILITY_NAME in self.special_mapDict:
-            success = self.special_mapDict[self.ABILITY_NAME](target, caster)
-            return success
-        else:
-            print("special_sorter: ABILITY DOES NOT EXIST!!!!!!!!")             #for debugging
+        method_name = self.ABILITY_NAME.replace('/', ' ').title().replace(' ', '')
+        method = getattr(self, method_name, None)
+        if method is not None:
+            return method(target, caster)
+        print("special_sorter: no method found for '{}'".format(self.ABILITY_NAME))
 
     #uses EFFECT_VALUES in AttrValDict to find which unit stats to change. Usually called twice: at initial cast, and revert at expiration
     def effect_stat_modifier(self, add_remove, target):
@@ -367,7 +338,7 @@ class Ability():
     #This section contains all methods used by abilities that have unique mechanics not covered by basic ones
     #
     def SharpenSword(self, target, caster=None):             
-        if self.turns_left == self.AttrValDict["LASTS"]:
+        if self.turns_left == self.AttrValDict["TICKS"]:
             self.effect_stat_modifier("add", target)
             print("{} whets his sword until it is razor sharp (ATK +10 / CRIT +25)".format(str(target)))
         elif self.turns_left == 0:                                     #reverse effects after last turn
@@ -386,7 +357,7 @@ class Ability():
 
     #
     def Poison(self, target, caster=None):
-        if self.turns_left == self.AttrValDict["LASTS"]:
+        if self.turns_left == self.AttrValDict["TICKS"]:
             minDMG, maxDMG = self.calculate_ability_dmg_range()
             damage = randint(minDMG,maxDMG) - math.floor(target.DEF)
             if damage <= 0:
@@ -408,7 +379,7 @@ class Ability():
 
     #
     def RaiseShield(self, target, caster=None):
-        if self.turns_left == self.AttrValDict["LASTS"]:
+        if self.turns_left == self.AttrValDict["TICKS"]:
             self.effect_stat_modifier("add", target)
             print("{}'s DEF has increased by 8!".format(str(target)))
         elif self.turns_left == 0:
@@ -417,7 +388,7 @@ class Ability():
 
     #
     def Sneak(self, target, caster=None):                                                                                  # also in future it could mean value could vary with unit stats e.g. MAGIC
-        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast,
+        if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast,
             self.effect_stat_modifier("add", target)
             print("{}'s DODGE has increased by 40 and CRIT by 80!".format(str(target)))
         elif self.turns_left == 0:                                                        #reverse effects in last turn
@@ -425,7 +396,7 @@ class Ability():
             print("{} takes a steady stance. Their DODGE and CRIT return to normal.".format(str(target)))
     #
     def Shroud(self, target, caster=None):                                                                                  # also in future it could mean value could vary with unit stats e.g. MAGIC
-        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast,
+        if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast,
             self.effect_stat_modifier("add", target)
             print("{}'s DODGE has increased by 60!".format(str(target)))
 
@@ -438,7 +409,7 @@ class Ability():
 
     #
     def Taunt(self, target, caster=None):                                                                                  
-        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
+        if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, 
             self.effect_stat_modifier("add", target)
             print("{}'s DEF has decreased by 6!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
@@ -447,7 +418,7 @@ class Ability():
 
     #
     def Uproar(self, target, caster=None):                                                                                  
-        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
+        if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, 
             self.effect_stat_modifier("add", target)
             print("{}'s ATK increased by 2 and CRIT has increased by 5!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
@@ -455,7 +426,7 @@ class Ability():
             print("{} regains his composure. His ATK and CRIT return to normal.".format(str(target)))
     #
     def Bless(self, target, caster=None):                                                                                  
-        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
+        if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, 
             self.effect_stat_modifier("add", target)
             print("{}'s DEF has increased by 4!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
@@ -464,7 +435,7 @@ class Ability():
 
     #
     def Deceive(self, target, caster=None):                                                                                  
-        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
+        if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, 
             self.effect_stat_modifier("add", target)
             print("{}'s DEF has decreased by 7 and DODGE by 15!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
@@ -473,7 +444,7 @@ class Ability():
 
     #
     def Disquiet(self, target, caster=None):                                                                                  
-        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
+        if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, 
             self.effect_stat_modifier("add", target)
             print("{}'s ATK and CRIT have decreased by 8 and 15!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
@@ -482,7 +453,7 @@ class Ability():
 
     #
     def Frenzy(self, target, caster=None):                                                                                  
-        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, 
+        if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, 
             self.effect_stat_modifier("add", target)
             print("{}'s ATK has increased by 6 and CRIT has increased by 15!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
@@ -491,7 +462,7 @@ class Ability():
 
     #
     def Mark(self, target, caster=None):
-        if self.turns_left == self.AttrValDict["LASTS"]:      #if just cast, apply DEF penalty
+        if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, apply DEF penalty
             before = target.DEF
             target.DEF -= 6
             self.sp_val = before - target.DEF   # actual amount deducted (handles DEF floor at 0)

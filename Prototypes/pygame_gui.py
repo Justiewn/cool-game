@@ -929,9 +929,9 @@ class GameGUI:
             effect_tooltip = attrs.get("EFFECT_TOOLTIP")
             if effect_tooltip:
                 lines.append(effect_tooltip)
-            lasts = attrs.get("LASTS", 0)
-            if lasts:
-                lines.append(f"Duration: {lasts - 1} turns")
+            ticks = attrs.get("TICKS", 0)
+            if ticks:
+                lines.append(f"Duration: {ticks - 1} turns")
             effect_stacks = attrs.get("EFFECT_STACKS", 0)
             if effect_stacks > 1:
                 lines.append(f"Max stacks: {effect_stacks}")
