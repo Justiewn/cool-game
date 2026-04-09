@@ -1,6 +1,6 @@
 """
 All ability effects (except initial mana cost) will be handled here.
-Entering point into this class is through Unit.choose_move(), where an Abilityobject is created, and then its determine_targets() method is called
+Entry point into this class is through Ability(move_name, id), then initial_cast() is called with a target_list.
 """
 
 import time
@@ -38,7 +38,7 @@ class Ability():
 
 #========================================Class methods===========================================================================================
     #Uses AbilitiesDict to get an attribute value for a named ability.
-    #This is used when an Ability object is not referred to directly, e.g. getting MP for Unit.display_moves()
+    #This is used when an Ability object is not referred to directly, e.g. getting MP_COST before creating the Ability object
     @classmethod
     def get_attr(cls, skill_name, ATTRIBUTE_NAME):
         try:
@@ -92,42 +92,23 @@ class Ability():
     def build_AttrValDict(self):
         return Ability._normalize_ability_entry(Ability.AbilitiesDict[self.ABILITY_NAME])
 
-    #determines this ability's available targets and gets targets (using select_target() if needed) to get a target_list
-    def determine_targets(self, caster, battle, is_multiplayer = False):
+    #returns a list of valid target units for this ability given a caster
+    def get_valid_targets(self, caster):
         target_type = self.AttrValDict["TARGET_TYPE"]
-        target_is_enemy = self.AttrValDict["TARGET_ENEMY"]
-
+        enemy = self.AttrValDict["TARGET_ENEMY"]
         if target_type == 0:
-            target_list = [caster]
+            return [caster]
+        if enemy:
+            team = Unit.get_units("alive", 1 - caster.team)
         else:
-            if target_is_enemy:
-                target_team = Unit.get_units("alive", 1 - caster.team)
-            else:
-                target_team = Unit.get_units("alive", caster.team)
-
-            if target_type == 1:
-                if len(target_team) == 1:
-                    target_list = [target_team[0]]
-                else:
-                    target = self.select_target(target_team, caster, battle, is_multiplayer)
-                    if target is None:
-                        return None
-                    target_list = [target]
-
-            elif target_type == 2:
-                target_list = target_team
-                if not target_list:
-                    print("No valid targets available.")
-                    return None
-
-            elif target_type == 3:
-                target_list = target_team
-
-            elif target_type == 4:
-                target_list = Unit.get_units("alive", 0) + Unit.get_units("alive", 1)
-
-        self.initial_cast(target_list, caster, battle)
-        return target_list
+            team = Unit.get_units("alive", caster.team)
+        if target_type in (1, 2, 3):
+            # if self.ABILITY_NAME == "Finish":
+            #     team = [u for u in team if "MARKED" in u.effect_stacks_dict]
+            return team
+        if target_type == 4:
+            return Unit.get_units("alive", 0) + Unit.get_units("alive", 1)
+        return []
 
     #sets the target_list and caster for this ability, takes MP_COST, displays 'used' output, and for every target in target_list, check effect_stacks if is a effect and cast_on_target(), then check_Ability_queue() if needed
     def initial_cast(self, target_list, caster, battle):
@@ -144,7 +125,7 @@ class Ability():
         target_sp_vals = {}
         target_results = {}
         for target in target_list:                      #for every target unit
-            if self.AttrValDict["IS_EFFECT"] and not self.check_stacks(target, battle):
+            if self.AttrValDict["IS_EFFECT"] and not battle.enforce_stack_limit(self, target):
                 continue
             target_success = self.cast_on_target(target, caster)
             target_results[id(target)] = target_success
@@ -188,58 +169,6 @@ class Ability():
             for target in self.target_list:
                 target.modify_effect_stack_dict("remove", self.AttrValDict["EFFECT_STATUS"])
         return success
-
-    #if the ability is past its EFFECT_STACKS limit, expire and remove the oldest instance of the same effect on the target
-    def check_stacks(self, target, battle):
-        times_stackable = self.AttrValDict["EFFECT_STACKS"]
-        effect_status = self.AttrValDict["EFFECT_STATUS"]
-        current_stacks = target.effect_stacks_dict.get(effect_status, 0)
-        if current_stacks >= times_stackable:
-            # Remove the oldest active effect with the same status on this target
-            for old_effect in battle.active_effects:
-                if (old_effect.AttrValDict.get("EFFECT_STATUS") == effect_status
-                        and target in old_effect.target_list):
-                    old_effect.turns_left = 0
-                    old_effect.cast_on_target(target, old_effect.caster)
-                    battle.active_effects.remove(old_effect)
-                    break
-        return True
-
-    #displays available targets (in targeted team and alive) and returns a unit from user input
-    def select_target(self, target_team, caster, battle, is_multiplayer = True):
-        targets_alive = target_team
-        if not targets_alive:
-            print("No valid targets available.")
-            return None
-
-        if is_multiplayer:
-            print("Who would you like to use {} on?".format(self.ABILITY_NAME))
-            for index, target in enumerate(targets_alive, start=1):
-                print("{}. {}".format(index, str(target)))
-            while True:
-                try:
-                    select_who = input("> ")
-                    if select_who == "b":
-                        caster.choose_move(battle, self)
-                        return None
-                    selected_index = int(select_who)
-                    if 1 <= selected_index <= len(targets_alive):
-                        target = targets_alive[selected_index - 1]
-                        if self.AttrValDict["IS_HEAL"]:
-                            if self.AttrValDict["HP_GAIN"] != 0 and target.hp >= target.max_hp:
-                                print("Already at full health!")
-                                continue
-                            if self.AttrValDict["MP_GAIN"] != 0 and target.mp >= target.max_mp:
-                                print("Already at full mana!")
-                                continue
-                        break
-                    print("Please enter a valid number or enter 'b' to go back.")
-                except ValueError:
-                    print("Please enter a number or enter 'b' to go back.")
-            print()
-        else:
-            target = random.choice(targets_alive)
-        return target
 
     #Do basic mechanics using ABILITY_ATTRIBUTES to target
     def cast_on_target(self, target, caster):          

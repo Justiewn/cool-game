@@ -108,6 +108,21 @@ class Battle:
     def get_targets_effects(self, unit):
         return [effect for effect in self.active_effects if unit in effect.target_list]
 
+    #if the target is at the EFFECT_STACKS limit, expire and remove the oldest instance of the same effect on that target
+    def enforce_stack_limit(self, ability, target):
+        times_stackable = ability.AttrValDict["EFFECT_STACKS"]
+        effect_status = ability.AttrValDict["EFFECT_STATUS"]
+        current_stacks = target.effect_stacks_dict.get(effect_status, 0)
+        if current_stacks >= times_stackable:
+            for old_effect in self.active_effects:
+                if (old_effect.AttrValDict.get("EFFECT_STATUS") == effect_status
+                        and target in old_effect.target_list):
+                    old_effect.turns_left = 0
+                    old_effect.cast_on_target(target, old_effect.caster)
+                    self.remove_effect(old_effect)
+                    break
+        return True
+
     def resolve_on_attacked(self, target, was_hit):
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
@@ -137,3 +152,7 @@ class Battle:
             effect.cast_on_target(attacker, effect.caster)
             if effect.turns_left == 0:
                 self.remove_effect(effect)
+
+    def is_battle_over(self):
+        from Units import Unit
+        return Unit.num_units(0, "alive") == 0 or Unit.num_units(1, "alive") == 0

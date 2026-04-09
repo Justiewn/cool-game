@@ -463,9 +463,6 @@ class GameGUI:
         else:
             self.log_scroll = min(self.log_scroll + 1, len(self.message_log) - max_lines)
 
-    def is_battle_over(self):
-        return Unit.num_units(0, "alive") == 0 or Unit.num_units(1, "alive") == 0
-
     def get_winner_text(self):
         if Unit.num_units(0, "alive") == 0:
             return "Enemies win!"
@@ -474,7 +471,7 @@ class GameGUI:
         return ""
 
     def next_turn(self):
-        if self.is_battle_over():
+        if self.battle.is_battle_over():
             self.game_over = True
             self.info_text = self.get_winner_text()
             return
@@ -504,7 +501,7 @@ class GameGUI:
         self.battle.resolve_turn_start(self.current_unit)
         self.battle.resolve_before_action(self.current_unit)
         Unit.downed(self.battle)
-        if self.is_battle_over():
+        if self.battle.is_battle_over():
             self.game_over = True
             self.info_text = self.get_winner_text()
             return
@@ -573,7 +570,7 @@ class GameGUI:
         if self.selected_ability.AttrValDict["MP_COST"] > self.current_unit.mp:
             self.log(f"Not enough MP for {move_name}.")
             return
-        available_targets = self.resolve_available_targets(self.selected_ability)
+        available_targets = self.selected_ability.get_valid_targets(self.current_unit)
         if not available_targets:
             self.log(f"No valid targets for {move_name}.")
             self.selected_ability = None
@@ -585,25 +582,6 @@ class GameGUI:
 
         self.available_targets = None
         self.cast_selected_ability(available_targets)
-
-    def resolve_available_targets(self, ability):
-        target_type = ability.AttrValDict["TARGET_TYPE"]
-        enemy = ability.AttrValDict["TARGET_ENEMY"]
-        if target_type == 0:
-            return [self.current_unit]
-
-        if enemy:
-            team = Unit.get_units("alive", 1 - self.current_unit.team)
-        else:
-            team = Unit.get_units("alive", self.current_unit.team)
-
-        if target_type in (1, 2, 3):
-            if ability.ABILITY_NAME == "Finish":
-                team = [u for u in team if "MARKED" in u.effect_stacks_dict]
-            return team
-        if target_type == 4:
-            return Unit.get_units("alive", 0) + Unit.get_units("alive", 1)
-        return []
 
     def cast_selected_ability(self, targets):
         if not self.selected_ability or not targets:
@@ -638,47 +616,16 @@ class GameGUI:
         self.available_targets = None
         self.info_text = f"{self.current_unit} is choosing a move."
 
-    def choose_ai_move(self):
-        def can_use_move(move_name):
-            mp_cost = Ability.get_attr(move_name, "MP_COST")
-            if mp_cost > self.current_unit.mp:
-                return False
-            target_type = Ability.get_attr(move_name, "TARGET_TYPE")
-            target_enemy = Ability.get_attr(move_name, "TARGET_ENEMY")
-            if target_type == 0:
-                return True
-            if target_enemy:
-                targets = Unit.get_units("alive", 1 - self.current_unit.team)
-            else:
-                targets = Unit.get_units("alive", self.current_unit.team)
-            return bool(targets)
-
-        hp_ratio = (self.current_unit.hp / self.current_unit.max_hp) if self.current_unit.max_hp else 0
-        if hp_ratio >= 0.15 and len(self.current_unit.movesList) > 1:
-            second_move = self.current_unit.movesList[1]
-            if can_use_move(second_move):
-                return second_move
-
-        valid_moves = []
-        for move in self.current_unit.movesList:
-            if can_use_move(move):
-                valid_moves.append(move)
-
-        if hp_ratio < 0.15 and "Rest" in valid_moves:
-            return "Rest"
-
-        return random.choice(valid_moves) if valid_moves else None
-
     def execute_enemy_ai(self):
         self.action_locked = True
-        move_name = self.choose_ai_move()
+        move_name = self.current_unit.choose_ai_move()
         if move_name is None:
             self.log(f"{self.current_unit} cannot act.")
             self.ai_pending_targets = []
             pygame.time.set_timer(AI_CAST_EVENT, 200, loops=1)
             return
         self.selected_ability = Ability(move_name, Ability.ability_ID_counter)
-        available_targets = self.resolve_available_targets(self.selected_ability)
+        available_targets = self.selected_ability.get_valid_targets(self.current_unit)
         if self.selected_ability.AttrValDict["TARGET_TYPE"] == 1 and available_targets:
             available_targets = [random.choice(available_targets)]
         self.ai_pending_targets = available_targets
@@ -845,7 +792,7 @@ class GameGUI:
             ability = Ability(move_name, Ability.ability_ID_counter)
         except Exception:
             return []
-        return self.resolve_available_targets(ability)
+        return ability.get_valid_targets(self.current_unit)
 
     def get_hovered_ability_info(self, move_name):
         try:
