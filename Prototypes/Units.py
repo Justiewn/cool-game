@@ -399,7 +399,7 @@ class Unit_Thief(Unit):
         self.DODGE = 10          # /100%
         self.SPEED = 16         # max speed is 20
 
-        self.movesList = ["Rest", "Shiv", 'Sneak', 'Deceive']
+        self.movesList = ["Rest", "Shiv", 'Sneak', 'Distract']
 
     def __str__(self):
         return self.name + " the " + Unit_Thief.className

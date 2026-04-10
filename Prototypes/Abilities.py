@@ -363,7 +363,7 @@ class Ability():
             print("{} regains his composure. His DEF returns to normal.".format(str(target)))
 
     #
-    def Deceive(self, target, caster=None):                                                                                  
+    def Distract(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, 
             self.effect_stat_modifier("add", target)
             print("{}'s DEF has decreased by 7 and DODGE by 15!".format(str(target)))

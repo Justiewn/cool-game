@@ -147,7 +147,7 @@
       "CAST_SOUND": "shiv.mp3",
       "HIT_TYPE": "SHARP"
     },
-    "Deceive": {
+    "Distract": {
       "TARGET_TYPE": 1,
       "TARGET_ENEMY": true,
       "TARGET_NUM": null,
@@ -168,7 +168,7 @@
       "EFFECT_TICK_PHASE": 0,
       "EFFECT_TICK_ON_HIT_ONLY": false,
       "EFFECT_STACKS": 1,
-      "EFFECT_STATUS": "DECEIV",
+      "EFFECT_STATUS": "DISTRACT",
       "EFFECT_TOOLTIP": "DEF-7 DODGE-15",
       "EFFECT_VALUES": {
         "max_hp": 0,
@@ -178,7 +178,7 @@
         "CRIT": 0,
         "DODGE": -15
       },
-      "TOOLTIP_INFO": "Lower a target enemy's DEF and DODGE temporarily",
+      "TOOLTIP_INFO": "Lowers the defences of a target enemy temporarily",
       "CAST_SOUND": "deceive.mp3",
       "HIT_TYPE": null
     },
@@ -197,8 +197,8 @@
       "HP_GAIN": 0,
       "MP_GAIN": 0,
       "IS_EFFECT": true,
-      "TICKS": 3,
-      "EFFECT_TRIGGERS_ON": 0,
+      "TICKS": 1,
+      "EFFECT_TRIGGERS_ON": 2,
       "EFFECT_TICK_OWNER": 0,
       "EFFECT_TICK_PHASE": 0,
       "EFFECT_TICK_ON_HIT_ONLY": false,
@@ -213,7 +213,7 @@
         "CRIT": 80,
         "DODGE": 40
       },
-      "TOOLTIP_INFO": "Boost own DODGE and CRIT briefly",
+      "TOOLTIP_INFO": "Hide in the shadows until your next attack. Your next attack will have high CRIT chance.",
       "CAST_SOUND": "sneak.mp3",
       "HIT_TYPE": null
     },
@@ -380,7 +380,7 @@
       "MP_GAIN": 0,
       "IS_EFFECT": true,
       "TICKS": 2,
-      "EFFECT_TRIGGERS_ON": 0,
+      "EFFECT_TRIGGERS_ON": 2,
       "EFFECT_TICK_OWNER": 1,
       "EFFECT_TICK_PHASE": 1,
       "EFFECT_TICK_ON_HIT_ONLY": false,
@@ -395,7 +395,7 @@
         "CRIT": 25,
         "DODGE": 0
       },
-      "TOOLTIP_INFO": "Boost own ATK and CRIT temporarily",
+      "TOOLTIP_INFO": "Increase own ATK and CRIT for two attacks.",
       "CAST_SOUND": "sharpen_sword.mp3",
       "HIT_TYPE": null
     },
@@ -430,7 +430,7 @@
         "CRIT": 0,
         "DODGE": 0
       },
-      "TOOLTIP_INFO": "Boost own DEF until next turn",
+      "TOOLTIP_INFO": "Increase DEF until the start of your next turn",
       "CAST_SOUND": "raise_shield.mp3",
       "HIT_TYPE": null
     },
@@ -556,7 +556,7 @@
       "EFFECT_STATUS": null,
       "EFFECT_TOOLTIP": null,
       "EFFECT_VALUES": null,
-      "TOOLTIP_INFO": "Deal physical damage; bonus if target is MARKED",
+      "TOOLTIP_INFO": "Deal physical damage; If target is MARKED, deal an additional 1 damage for every 5 points of HP the target is missing",
       "CAST_SOUND": "dagger_stab.mp3",
       "HIT_TYPE": "SHARP"
     },
@@ -591,7 +591,7 @@
         "CRIT": 0,
         "DODGE": 60
       },
-      "TOOLTIP_INFO": "Recover MP and boost DODGE until next turn",
+      "TOOLTIP_INFO": "Recover MP and boost DODGE until the start of your next turn",
       "CAST_SOUND": "shroud.mp3",
       "HIT_TYPE": null
     },
@@ -617,7 +617,7 @@
       "EFFECT_TICK_ON_HIT_ONLY": false,
       "EFFECT_STACKS": 1,
       "EFFECT_STATUS": "MARKED",
-      "EFFECT_TOOLTIP": "DEF-6 | MARKED",
+      "EFFECT_TOOLTIP": "DEF-6",
       "EFFECT_VALUES": null,
       "TOOLTIP_INFO": "Weaken and MARK target enemy",
       "CAST_SOUND": "mark.mp3",
@@ -645,7 +645,7 @@
       "EFFECT_TICK_ON_HIT_ONLY": false,
       "EFFECT_STACKS": 2,
       "EFFECT_STATUS": "PSN",
-      "EFFECT_TOOLTIP": "PSN: -15% Current HP/ stack",
+      "EFFECT_TOOLTIP": "-15% Current HP/ stack",
       "EFFECT_VALUES": null,
       "TOOLTIP_INFO": "Inflict damage and poison target for several turns",
       "CAST_SOUND": "poison_dart.mp3",
