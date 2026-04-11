@@ -13,7 +13,7 @@ class Battle:
         # EFFECT_TICK_OWNER == 1 means the effect ticks on the caster's action (not the target's turn).
         # EFFECT_TICK_PHASE == 1 means it fires after the action; skip the immediate post-cast call.
         effect.skip_first_after_action_tick = (
-            effect.AttrValDict.get("EFFECT_TRIGGERS_ON", 0) == 0
+            effect.AttrValDict.get("EFFECT_TICKS_ON", 0) == 0
             and effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) == 1
             and effect.AttrValDict.get("EFFECT_TICK_PHASE", 0) == 1
         )
@@ -39,7 +39,7 @@ class Battle:
         """TICK_OWNER=0, TICK_PHASE=0 — fires at the start of the target's turn."""
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
-            if effect.AttrValDict.get("EFFECT_TRIGGERS_ON", 0) != 0 or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 0:
+            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in (0, 1, 2) or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 0:
                 continue
             if effect.AttrValDict.get("EFFECT_TICK_PHASE", 0) != 0:
                 continue
@@ -54,7 +54,7 @@ class Battle:
         """TICK_OWNER=1, TICK_PHASE=0 — fires at the start of the caster's turn."""
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
-            if effect.AttrValDict.get("EFFECT_TRIGGERS_ON", 0) != 0 or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 1:
+            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in (0, 1, 2) or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 1:
                 continue
             if effect.AttrValDict.get("EFFECT_TICK_PHASE", 0) != 0:
                 continue
@@ -70,7 +70,7 @@ class Battle:
         """TICK_OWNER=1, TICK_PHASE=1 — fires at the end of the caster's action."""
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
-            if effect.AttrValDict.get("EFFECT_TRIGGERS_ON", 0) != 0 or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 1:
+            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in (0, 1, 2) or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 1:
                 continue
             if effect.AttrValDict.get("EFFECT_TICK_PHASE", 0) != 1:
                 continue
@@ -89,7 +89,7 @@ class Battle:
         """TICK_OWNER=0, TICK_PHASE=1 — fires at the end of the target's turn."""
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
-            if effect.AttrValDict.get("EFFECT_TRIGGERS_ON", 0) != 0 or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 0:
+            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in (0, 1, 2) or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 0:
                 continue
             if effect.AttrValDict.get("EFFECT_TICK_PHASE", 0) != 1:
                 continue
@@ -126,8 +126,8 @@ class Battle:
     def resolve_on_attacked(self, target, was_hit):
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
-            triggers_on = effect.AttrValDict.get("EFFECT_TRIGGERS_ON", 0)
-            if triggers_on not in (1, 3):
+            triggers_on = effect.AttrValDict.get("EFFECT_TICKS_ON", 0)
+            if triggers_on not in (2, 4, 5):
                 continue
             if target not in effect.target_list:
                 continue
@@ -141,8 +141,8 @@ class Battle:
     def resolve_on_attacking(self, attacker, hit_any):
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
-            triggers_on = effect.AttrValDict.get("EFFECT_TRIGGERS_ON", 0)
-            if triggers_on not in (2, 3):
+            triggers_on = effect.AttrValDict.get("EFFECT_TICKS_ON", 0)
+            if triggers_on not in (1, 3, 5):
                 continue
             if attacker not in effect.target_list:
                 continue

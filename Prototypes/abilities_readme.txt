@@ -49,21 +49,26 @@ TICKS (int)
 Number of (caster) moves this ability will last for (0 for immediate expiration)
 
 
-EFFECT_TRIGGERS_ON (int)
-0 = effect loses a tick per turn (governed by EFFECT_TICK_OWNER + EFFECT_TICK_PHASE)
-1 = effect loses a tick when the target is attacked
-2 = effect loses a tick when the target attacks
-3 = effect loses a tick when the target is attacked OR attacks
+EFFECT_TICKS_ON (int)
+When the effect loses a tick 
+0 = per turn (governed by EFFECT_TICK_OWNER + EFFECT_TICK_PHASE)
+1 = per turn OR when the target attacks
+2 = per turn OR when the target is attacked
+3 = per turn OR when the target is attacked OR attacks
+4 = when the target attacks
+5 = when the target is attacked
+6 = when the target is attacked OR attacks
 
 EFFECT_TICK_OWNER (int) 
-0 = effect ticks on the target's turn, 1 = effect ticks on the caster's turn
-Only applies when EFFECT_TRIGGERS_ON = 0
+0 = effect ticks on the target's turn
+1 = effect ticks on the caster's turn
+Only applies when EFFECT_TICKS_ON = 0
 
 EFFECT_TICK_PHASE (int)
 0 = tick fires at the start of the relevant turn, 1 = tick fires at the end of the relevant turn
 
 EFFECT_TICK_ON_HIT_ONLY (bool)
-Only applies when EFFECT_TRIGGERS_ON >= 1
+Only applies when EFFECT_TICKS_ON >= 1
 true = tick only fires if the triggering attack actually lands (not dodged)
 false = tick fires regardless of dodge
 
