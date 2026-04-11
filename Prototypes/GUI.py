@@ -21,6 +21,7 @@ FPS = 30
 
 WHITE = (245, 245, 245)
 BLACK = (20, 20, 20)
+TRUE_BLACK = (0, 0, 0)
 DARK_GRAY = (45, 45, 45)
 LIGHT_GRAY = (200, 200, 200)
 BLUE = (70, 130, 180)
@@ -51,8 +52,8 @@ CARD_W = 300
 ENEMY_CARD_X = WIDTH - LOG_PANEL_W - 30 - CARD_W
 # Selection layout constants
 SEL_SLOT_W = 220
-SEL_P_X = 80
-SEL_E_X = WIDTH - 80 - SEL_SLOT_W
+SEL_P_X = 180
+SEL_E_X = WIDTH - 180 - SEL_SLOT_W
 LOG_PANEL_H = 0  # unused, kept for compatibility
 
 
@@ -155,6 +156,11 @@ class GameGUI:
         self.enemy_ai_enabled = True
         self.log_scroll = 0
         self.unit_portraits = self.load_unit_portraits()
+        self.scenario_images = {}
+        self.scenario_images_fullscreen = {}
+        self.scenario_preview_image = None
+        self.scenario_preview_image_fullscreen = None
+        self.load_scenario_images()
         self.sounds = {}
         self.load_sounds()
         self.unit_effect_rects = {}  # (unit, status) -> pill Rect
@@ -185,6 +191,38 @@ class GameGUI:
         pygame.draw.line(fallback, BLACK, (6, 6), (28, 28), 3)
         pygame.draw.line(fallback, BLACK, (28, 6), (6, 28), 3)
         return fallback
+
+    def load_scenario_images(self):
+        scenarios_dir = os.path.join(os.path.dirname(__file__), "images", "scenarios")
+        for scenario in self.SCENARIOS:
+            filename = scenario["name"].lower().replace(" ", "_") + ".png"
+            path = os.path.join(scenarios_dir, filename)
+            try:
+                img = pygame.image.load(path).convert_alpha()
+                small = pygame.transform.smoothscale(img, (1100, 800))
+                small = self._apply_fade_mask(small)
+                self.scenario_images[scenario["name"]] = small
+                full = pygame.transform.smoothscale(img, (WIDTH-500, HEIGHT-200))
+                full = self._apply_fade_mask(full, corner_radius=30, fade_width=50)
+                self.scenario_images_fullscreen[scenario["name"]] = full
+            except Exception:
+                pass
+
+    def _apply_fade_mask(self, img, corner_radius=120, fade_width=120):
+        iw, ih = img.get_size()
+        mask = pygame.Surface((iw, ih), pygame.SRCALPHA)
+        mask.fill((0, 0, 0, 0))
+        # Draw concentric rounded rects, largest first (low alpha) to smallest last (high alpha).
+        # Each pixel ends up with the alpha of the last rect that covers it, which is the
+        # rect whose inset matches that pixel's distance from the nearest edge.
+        for inset in range(1, fade_width + 1):
+            alpha = int(255 * inset / fade_width)
+            rect = pygame.Rect(inset, inset, iw - inset * 2, ih - inset * 2)
+            if rect.width > 0 and rect.height > 0:
+                pygame.draw.rect(mask, (255, 255, 255, alpha), rect, border_radius=corner_radius)
+        result = img.copy()
+        result.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        return result
 
     def load_unit_portraits(self):
         portraits_dir = os.path.join(os.path.dirname(__file__), "images", "portraits")
@@ -297,8 +335,8 @@ class GameGUI:
         self.remove_slot_buttons = []
         self.add_slot_buttons = {}
 
-        self.start_button = Button((WIDTH // 2 - 120, HEIGHT - 130, 240, 50), "START BATTLE", self.start_battle, color=GREEN)
-        self.ai_toggle_button = Button((WIDTH // 2 - 120, HEIGHT - 190, 240, 50), f"Enemy AI: {'ON' if self.enemy_ai_enabled else 'OFF'}", self.toggle_enemy_ai, color=BLUE)
+        self.start_button = Button((WIDTH - 300, HEIGHT - 130, 240, 50), "START BATTLE", self.start_battle, color=GREEN)
+        self.ai_toggle_button = Button((WIDTH - 300, HEIGHT - 190, 240, 50), f"Enemy AI: {'ON' if self.enemy_ai_enabled else 'OFF'}", self.toggle_enemy_ai, color=BLUE)
 
         for i in range(len(self.player_team)):
             rect = (P_X, SLOT_Y + i * SLOT_SPACING, SLOT_W, SLOT_H)
@@ -310,12 +348,12 @@ class GameGUI:
         btn_cy_offset = (SLOT_H - 26) // 2
         if len(self.player_team) > 1:
             for i in range(len(self.player_team)):
-                rect = (P_X + SLOT_W + 4, SLOT_Y + i * SLOT_SPACING + btn_cy_offset, 22, 26)
+                rect = (P_X + SLOT_W - 40, SLOT_Y + i * SLOT_SPACING + btn_cy_offset, 22, 26)
                 self.remove_slot_buttons.append(Button(rect, "×", lambda i=i: self._remove_slot('player', i),
                                                        color=(190, 80, 80), hover_color=(220, 100, 100)))
         if len(self.enemy_team) > 1:
             for i in range(len(self.enemy_team)):
-                rect = (E_X - 26, SLOT_Y + i * SLOT_SPACING + btn_cy_offset, 22, 26)
+                rect = (E_X + 180, SLOT_Y + i * SLOT_SPACING + btn_cy_offset, 22, 26)
                 self.remove_slot_buttons.append(Button(rect, "×", lambda i=i: self._remove_slot('enemy', i),
                                                        color=(190, 80, 80), hover_color=(220, 100, 100)))
 
@@ -332,7 +370,7 @@ class GameGUI:
 
         self.scenario_buttons = []
         for i, scenario in enumerate(self.SCENARIOS):
-            rect = (WIDTH // 2 - 150, 200 + i * 65, 300, 48)
+            rect = (WIDTH // 2 - 150, 950 + i * 65, 300, 48)
             btn = Button(rect, scenario["name"], lambda s=scenario: self.apply_scenario(s),
                          color=(90, 110, 160), hover_color=(115, 138, 190))
             self.scenario_buttons.append(btn)
@@ -344,6 +382,8 @@ class GameGUI:
             self.player_team = list(scenario["player"])
             self.enemy_team = list(scenario["enemy"])
             self.active_scenario = scenario
+        self.scenario_preview_image = self.scenario_images.get(scenario["name"])
+        self.scenario_preview_image_fullscreen = self.scenario_images_fullscreen.get(scenario["name"])
         self.setup_team_selection()
 
     def _add_slot(self, team_type):
@@ -925,11 +965,11 @@ class GameGUI:
             self.screen.blit(text_surface, (tooltip_rect.x + padding, tooltip_rect.y + padding + i * line_height))
 
     def draw_selection_screen(self):
-        self.screen.fill(WHITE)
-        title = TITLE_FONT.render("Team Selection", True, BLACK)
+        self.screen.fill(TRUE_BLACK)
+        title = TITLE_FONT.render("Team Selection", True, WHITE)
         self.screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 30))
-        player_title = TITLE_FONT.render("Player Team", True, BLACK)
-        enemy_title = TITLE_FONT.render("Enemy Team", True, BLACK)
+        player_title = TITLE_FONT.render("Player Team", True, WHITE)
+        enemy_title = TITLE_FONT.render("Enemy Team", True, WHITE)
         self.screen.blit(player_title, (SEL_P_X + 30, 130))
         self.screen.blit(enemy_title, (SEL_E_X + 30, 130))
 
@@ -940,11 +980,11 @@ class GameGUI:
         self.draw_team_preview(self.player_team, SEL_P_X, 180)
         self.draw_team_preview(self.enemy_team, SEL_E_X, 180)
 
-        info_text = "Click a slot to cycle through unit classes. Then press START BATTLE."
-        draw_text(self.screen, info_text, pygame.Rect(WIDTH // 2 - 300, 90, 600, 40), FONT, BLACK)
+        # info_text = "Click a slot to cycle through unit classes. Then press START BATTLE."
+        # draw_text(self.screen, info_text, pygame.Rect(WIDTH // 2 - 300, 90, 600, 40), FONT, BLACK)
 
-        scenario_label = FONT.render("— Scenarios —", True, DARK_GRAY)
-        self.screen.blit(scenario_label, (WIDTH // 2 - scenario_label.get_width() // 2, 163))
+        scenario_label = FONT.render("— Scenarios —", True, LIGHT_GRAY)
+        self.screen.blit(scenario_label, (WIDTH // 2 - scenario_label.get_width() // 2, 900))
         for button in self.scenario_buttons:
             button.update(mouse_pos)
             button.draw(self.screen)
@@ -960,9 +1000,15 @@ class GameGUI:
         self.ai_toggle_button.draw(self.screen)
         self.start_button.update(mouse_pos)
         self.start_button.draw(self.screen)
+        if self.scenario_preview_image is not None:
+            self.draw_scenario_preview()
         if self.quit_confirm:
             self.draw_quit_overlay()
         pygame.display.flip()
+
+    def draw_scenario_preview(self):
+        img_rect = self.scenario_preview_image.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 100))
+        self.screen.blit(self.scenario_preview_image, img_rect)
 
     def draw_team_preview(self, team, x, y):
         for index, class_key in enumerate(team):
@@ -1020,7 +1066,11 @@ class GameGUI:
             button.draw(self.screen)
 
     def draw_battle_screen(self):
-        self.screen.fill(WHITE)
+        self.screen.fill(TRUE_BLACK)
+        if self.scenario_preview_image_fullscreen is not None:
+            self.screen.blit(self.scenario_preview_image_fullscreen, (100, 100))
+        elif self.scenario_preview_image is not None:
+            self.draw_scenario_preview()
         self.draw_buttons()
         mouse_pos = pygame.mouse.get_pos()
         hovered_unit = self.draw_units(mouse_pos)
@@ -1061,14 +1111,9 @@ class GameGUI:
                     BACK_SIZE = 30
                     GAP = 5
                     btn_cy = selected_button.rect.centery
-                    if self.current_unit and self.current_unit.team == 0:
-                        # Player: card-closest side is the left of the ability column
-                        bx = selected_button.rect.left - GAP - BACK_SIZE
-                    else:
-                        # Enemy: card-closest side is the right of the ability column
-                        bx = selected_button.rect.right + GAP
+                    bx = selected_button.rect.left + 4
                     back_rect = pygame.Rect(bx, btn_cy - BACK_SIZE // 2, BACK_SIZE, BACK_SIZE)
-                    self.cancel_target_button = Button(back_rect, "<", self.cancel_target_selection, color=(200, 80, 80), hover_color=(220, 100, 100))
+                    self.cancel_target_button = Button(back_rect, "X", self.cancel_target_selection, color=(200, 80, 80), hover_color=(220, 100, 100))
                     self.cancel_target_button.update(mouse_pos)
                     self.cancel_target_button.draw(self.screen)
         elif self.state == 'team_select':
