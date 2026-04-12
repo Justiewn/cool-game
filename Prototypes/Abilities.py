@@ -55,10 +55,10 @@ class Ability():
     def damage_target(cls, final_damage, target, dmg_type, is_crit=False):
         if dmg_type == "NORMAL":
             damage_message = "physical"
-            blocked_message = "Their defence is too high!"
+            blocked_message = "their defence is too high!"
         elif dmg_type == "MAGIC":
             damage_message = "magic"
-            blocked_message = "Their magic is too strong!"
+            blocked_message = "their magic defence is too strong!"
         if final_damage > 0:                                #if there is damage,
             target.hp -= final_damage                             #target loses HP
             if is_crit:
@@ -125,8 +125,8 @@ class Ability():
         target_sp_vals = {}
         target_results = {}
         for target in target_list:                      #for every target unit
-            if self.AttrValDict["IS_EFFECT"] and not battle.enforce_stack_limit(self, target):
-                continue
+            if self.AttrValDict["IS_EFFECT"]:
+                battle.enforce_stack_limit(self, target)
             target_success = self.cast_on_target(target, caster)
             target_results[id(target)] = target_success
             if isinstance(self.sp_val, dict):           # capture actual stat changes per target
@@ -384,7 +384,7 @@ class Ability():
     def Frenzy(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, 
             self.effect_stat_modifier("add", target)
-            print("{}'s ATK has increased by 6 and CRIT has increased by 15!".format(str(target)))
+            print("{}'s ATK/CRIT has increased and DEF/DODGE has decreased!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
             self.effect_stat_modifier("remove", target)
             print("{} calms. His ATK and CRIT return to normal.".format(str(target)))
@@ -392,13 +392,10 @@ class Ability():
     #
     def Mark(self, target, caster=None):
         if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, apply DEF penalty
-            before = target.DEF
-            target.DEF -= 6
-            self.sp_val = before - target.DEF   # actual amount deducted (handles DEF floor at 0)
+            self.effect_stat_modifier("add", target)
             print("{} has been Marked! Their DEF has decreased by {}!".format(str(target), self.sp_val))
         elif self.turns_left == 0:                                                        #reverse effect on expiry
-            deducted = self.sp_val if self.sp_val is not None else 6
-            target.DEF += deducted
+            self.effect_stat_modifier("remove", target)
             print("{} is no longer Marked. Their DEF returns to normal.".format(str(target)))
 
     #

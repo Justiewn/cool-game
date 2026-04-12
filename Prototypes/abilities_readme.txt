@@ -65,7 +65,8 @@ EFFECT_TICK_OWNER (int)
 Only applies when EFFECT_TICKS_ON = 0
 
 EFFECT_TICK_PHASE (int)
-0 = tick fires at the start of the relevant turn, 1 = tick fires at the end of the relevant turn
+0 = tick fires at the start of the relevant turn, 
+1 = tick fires at the end of the relevant turn
 
 EFFECT_TICK_ON_HIT_ONLY (bool)
 Only applies when EFFECT_TICKS_ON >= 1

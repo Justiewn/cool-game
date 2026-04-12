@@ -121,7 +121,6 @@ class Battle:
                     old_effect.cast_on_target(target, old_effect.caster)
                     self.remove_effect(old_effect)
                     break
-        return True
 
     def resolve_on_attacked(self, target, was_hit):
         self.cleanup_expired_effects()

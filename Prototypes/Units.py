@@ -23,6 +23,7 @@ class Unit:
 
     className = "Thug"
     player_name = "Player"
+    name_pool = ["Brutus", "Rex", "Knuckles", "Mack", "Biff", "Sledge", "Dirk", "Crank"]
     team_zero_list = []
     team_zero_alive_list = []
     team_one_list = []
@@ -65,7 +66,7 @@ class Unit:
             Unit.team_one_alive_list.append(self)
 
     def __str__(self):
-        return self.name + " the " + Unit.className
+        return Unit.className + " | " + self.name
 
 #~~~~~~~~~~~~Class methods~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #returns len() of a team_list or team_alive_list using parameters team = 0, 1, all_alive = "all", "alive"
@@ -356,6 +357,7 @@ class Unit:
 class Unit_Knight(Unit):
 
     className = "Knight"
+    name_pool = ["Aldric", "Roland", "Gareth", "Percival", "Baldwin", "Edmund", "Gawain", "Tristan"]
 
     def __init__(self, name, team):
         super().__init__(name, team)
@@ -377,11 +379,12 @@ class Unit_Knight(Unit):
         self.movesList = ["Rest", "Sword slash", 'Raise shield', 'Sharpen sword']
 
     def __str__(self):
-        return self.name + " the " + Unit_Knight.className
+        return Unit_Knight.className + " | " + self.name
 
 class Unit_Thief(Unit):
 
     className = "Thief"
+    name_pool = ["Sly", "Jinx", "Nix", "Flick", "Pip", "Shadow", "Kip"]
 
     def __init__(self, name, team):
         super().__init__(name, team)
@@ -402,11 +405,12 @@ class Unit_Thief(Unit):
         self.movesList = ["Rest", "Shiv", 'Sneak', 'Distract']
 
     def __str__(self):
-        return self.name + " the " + Unit_Thief.className
+        return Unit_Thief.className + " | " + self.name
 
 class Unit_Priest(Unit):
 
     className = "Priest"
+    name_pool = ["Ansel", "Caleb", "Dorian", "Elias", "Finn", "Gregory", "Hugh", "Isaiah"]
 
     def __init__(self, name, team):
         super().__init__(name, team)
@@ -427,11 +431,12 @@ class Unit_Priest(Unit):
         self.movesList = ["Rest", "Smite", 'Heal', "Bless", 'Rejuvenation']
 
     def __str__(self):
-        return self.name + " the " + Unit_Priest.className
+        return Unit_Priest.className + " | " + self.name
 
 class Unit_Berserker(Unit):
 
     className = "Berserker"
+    name_pool = ["Ragnar", "Bjorn", "Thorvald", "Ulf", "Gunnar", "Havar", "Sigurd", "Ivar"]
 
     def __init__(self, name, team):
         super().__init__(name, team)
@@ -453,11 +458,12 @@ class Unit_Berserker(Unit):
         self.movesList = ["Rest", "Cleave", "Frenzy", "Taunt"]
 
     def __str__(self):
-        return self.name + " the " + Unit_Berserker.className
+        return Unit_Berserker.className + " | " + self.name
 
 class Unit_Assassin(Unit):
 
     className = "Assassin"
+    name_pool = ["Vex", "Cipher", "Dusk", "Wraith", "Null", "Shade", "Ghost", "Zephyr"]
 
     def __init__(self, name, team):
         super().__init__(name, team)
@@ -475,7 +481,7 @@ class Unit_Assassin(Unit):
         self.DODGE = 10          # /100%
         self.SPEED = 20         # max speed is 20
 
-        self.movesList = ["Rest", "Stab/Backstab", 'Shroud', 'Mark', 'Poison']
+        self.movesList = [ 'Shroud', "Stab/Backstab", 'Mark', 'Poison']
 
     def __str__(self):
-        return self.name + " the " + Unit_Assassin.className
+        return Unit_Assassin.className + " | " + self.name

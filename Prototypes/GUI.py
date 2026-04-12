@@ -292,35 +292,24 @@ class GameGUI:
         Unit.remove_all()
         self.battle = Battle()
         Unit.player_name = "Hero"
-        for index, class_key in enumerate(self.player_team):
-            name = f"Player {index + 1}"
-            if class_key == 'K':
-                Unit_Knight(name, 0)
-            elif class_key == 'P':
-                Unit_Priest(name, 0)
-            elif class_key == 'TH':
-                Unit_Thief(name, 0)
-            elif class_key == 'B':
-                Unit_Berserker(name, 0)
-            elif class_key == 'A':
-                Unit_Assassin(name, 0)
-            else:
-                Unit(name, 0)
+        _class_map = {'K': Unit_Knight, 'P': Unit_Priest, 'TH': Unit_Thief, 'B': Unit_Berserker, 'A': Unit_Assassin}
+        _used_names = set()
 
-        for index, class_key in enumerate(self.enemy_team):
-            name = f"Enemy {index + 1}"
-            if class_key == 'K':
-                Unit_Knight(name, 1)
-            elif class_key == 'P':
-                Unit_Priest(name, 1)
-            elif class_key == 'TH':
-                Unit_Thief(name, 1)
-            elif class_key == 'B':
-                Unit_Berserker(name, 1)
-            elif class_key == 'A':
-                Unit_Assassin(name, 1)
-            else:
-                Unit(name, 1)
+        def pick_name(unit_cls):
+            available = [n for n in unit_cls.name_pool if n not in _used_names]
+            if not available:
+                available = unit_cls.name_pool
+            name = random.choice(available)
+            _used_names.add(name)
+            return name
+
+        for class_key in self.player_team:
+            unit_cls = _class_map.get(class_key, Unit)
+            unit_cls(pick_name(unit_cls), 0)
+
+        for class_key in self.enemy_team:
+            unit_cls = _class_map.get(class_key, Unit)
+            unit_cls(pick_name(unit_cls), 1)
 
         self.message_log.clear()
         self.log_scroll = 0
@@ -599,8 +588,11 @@ class GameGUI:
                 btn_y = card_y + card_h + BTN_GAP + i * (BTN_H + BTN_GAP)
             rect = (card_x, btn_y, BTN_W, BTN_H)
             right_text = f"MP {mp_cost}" if move != "Rest" else ""
-            self.action_buttons.append(Button(rect, move, make_action(), color=BUTTON_COLOR,
-                                            hover_color=BUTTON_HOVER, tooltip=tooltip,
+            not_enough_mp = move != "Rest" and mp_cost > self.current_unit.mp
+            btn_color = (90, 90, 90) if not_enough_mp else BUTTON_COLOR
+            btn_hover = (110, 110, 110) if not_enough_mp else BUTTON_HOVER
+            self.action_buttons.append(Button(rect, move, make_action(), color=btn_color,
+                                            hover_color=btn_hover, tooltip=tooltip,
                                             right_text=right_text))
 
     def select_move(self, move_name):
@@ -936,7 +928,8 @@ class GameGUI:
             if pill_rect.collidepoint(mouse_pos):
                 tip = self.effect_tooltip_map.get(status)
                 if tip:
-                    return f"{tip}"
+                    stacks = unit.effect_stacks_dict.get(status, 1)
+                    return "\n".join([tip] * stacks)
         return None
 
     def get_hovered_ability_tooltip(self):

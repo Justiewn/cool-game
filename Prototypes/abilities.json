@@ -99,9 +99,9 @@
       "HP_GAIN": 0,
       "MP_GAIN": 0,
       "IS_EFFECT": true,
-      "TICKS": 6,
+      "TICKS": 3,
       "EFFECT_TICKS_ON": 0,
-      "EFFECT_TICK_OWNER": 0,
+      "EFFECT_TICK_OWNER": 1,
       "EFFECT_TICK_PHASE": 0,
       "EFFECT_TICK_ON_HIT_ONLY": false,
       "EFFECT_STACKS": 5,
@@ -115,7 +115,7 @@
         "CRIT": 5,
         "DODGE": 0
       },
-      "TOOLTIP_INFO": "Boost team's ATK and CRIT for several turns. Stacks",
+      "TOOLTIP_INFO": "Boost team's ATK and CRIT for several turns. Stacks 5 times",
       "CAST_SOUND": "uproar.mp3",
       "HIT_TYPE": null
     },
@@ -204,16 +204,16 @@
       "EFFECT_TICK_ON_HIT_ONLY": false,
       "EFFECT_STACKS": 1,
       "EFFECT_STATUS": "SNEAK",
-      "EFFECT_TOOLTIP": "CRIT+80 DODGE+40",
+      "EFFECT_TOOLTIP": "CRIT+80 DODGE+30",
       "EFFECT_VALUES": {
         "max_hp": 0,
         "max_mp": 0,
         "ATK": 0,
         "DEF": 0,
         "CRIT": 80,
-        "DODGE": 40
+        "DODGE": 30
       },
-      "TOOLTIP_INFO": "Hide in the shadows until your next attack. Your next attack will have high CRIT chance.",
+      "TOOLTIP_INFO": "Lurk in the shadows until your next attack. Your next attack will have high CRIT chance.",
       "CAST_SOUND": "sneak.mp3",
       "HIT_TYPE": null
     },
@@ -484,14 +484,14 @@
       "EFFECT_TICK_ON_HIT_ONLY": false,
       "EFFECT_STACKS": 1,
       "EFFECT_STATUS": "FRENZY",
-      "EFFECT_TOOLTIP": "ATK+6 DEF-5 CRIT+15 DODGE-5",
+      "EFFECT_TOOLTIP": "ATK+6 DEF-4 CRIT+15 DODGE-4",
       "EFFECT_VALUES": {
         "max_hp": 0,
         "max_mp": 0,
         "ATK": 6,
-        "DEF": -5,
+        "DEF": -4,
         "CRIT": 15,
-        "DODGE": -5
+        "DODGE": -4
       },
       "TOOLTIP_INFO": "Gain ATK and CRIT at cost of DEF and DODGE",
       "CAST_SOUND": "frenzy.mp3",
@@ -566,7 +566,7 @@
       "TARGET_NUM": null,
       "IS_SPECIAL": true,
       "CAN_DODGE": false,
-      "MP_COST": 3,
+      "MP_COST": 0,
       "DMG_TYPE": null,
       "DMG_IS_PERCENT": false,
       "DMG_BASE": 0,
@@ -582,14 +582,14 @@
       "EFFECT_TICK_ON_HIT_ONLY": false,
       "EFFECT_STACKS": 1,
       "EFFECT_STATUS": "SHROUD",
-      "EFFECT_TOOLTIP": "DODGE+60",
+      "EFFECT_TOOLTIP": "DODGE+70",
       "EFFECT_VALUES": {
         "max_hp": 0,
         "max_mp": 0,
         "ATK": 0,
         "DEF": 0,
         "CRIT": 0,
-        "DODGE": 60
+        "DODGE": 70
       },
       "TOOLTIP_INFO": "Recover MP and boost DODGE until the start of your next turn",
       "CAST_SOUND": "shroud.mp3",
@@ -618,7 +618,7 @@
       "EFFECT_STACKS": 1,
       "EFFECT_STATUS": "MARKED",
       "EFFECT_TOOLTIP": "DEF-6",
-      "EFFECT_VALUES": null,
+      "EFFECT_VALUES": {"DEF": -6},
       "TOOLTIP_INFO": "Weaken and MARK target enemy",
       "CAST_SOUND": "mark.mp3",
       "HIT_TYPE": null
@@ -645,7 +645,7 @@
       "EFFECT_TICK_ON_HIT_ONLY": false,
       "EFFECT_STACKS": 2,
       "EFFECT_STATUS": "PSN",
-      "EFFECT_TOOLTIP": "-15% Current HP/ stack",
+      "EFFECT_TOOLTIP": "-15% HP / stack",
       "EFFECT_VALUES": null,
       "TOOLTIP_INFO": "Inflict damage and poison target for several turns",
       "CAST_SOUND": "poison_dart.mp3",
