@@ -399,16 +399,16 @@ class GameGUI:
         cx = WIDTH // 2
         cy = self.screen.get_height() // 2
         self.pause_buttons = [
-            Button((cx - 110, cy + 40, 100, 44), "Yes", self.go_to_selection, color=RED),
-            Button((cx + 10, cy + 40, 100, 44), "No", self.resume_battle, color=GREEN),
+            Button((cx - 110, cy + 20, 100, 44), "Yes", self.go_to_selection, color=RED),
+            Button((cx + 10, cy + 20, 100, 44), "No", self.resume_battle, color=GREEN),
         ]
 
     def _setup_quit_buttons(self):
         cx = WIDTH // 2
         cy = HEIGHT // 2
         self.quit_buttons = [
-            Button((cx - 110, cy + 30, 100, 44), "Yes", self._do_quit, color=RED),
-            Button((cx + 10, cy + 30, 100, 44), "No", self._cancel_quit, color=GREEN),
+            Button((cx - 110, cy + 10, 100, 44), "Yes", self._do_quit, color=RED),
+            Button((cx + 10, cy + 10, 100, 44), "No", self._cancel_quit, color=GREEN),
         ]
 
     def _do_quit(self):
