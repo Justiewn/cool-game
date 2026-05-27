@@ -25,14 +25,72 @@ class Battle:
 
     def remove_effect(self, effect):
         if effect in self.active_effects:
+            print(f"Removing effect {effect.ABILITY_NAME} from battle")
             self.active_effects.remove(effect)
+        effect_status = effect.AttrValDict.get("EFFECT_STATUS")
         for target in effect.target_list:
             if effect in target.target_Ability_queue:
+                print(f"Removing effect {effect.ABILITY_NAME} from target {target.name}'s queue")
                 target.target_Ability_queue.remove(effect)
+            if effect_status:
+                target.modify_effect_stack_dict("remove", effect_status)
 
     def remove_target_effects(self, target):
         for effect in list(self.active_effects):
             if target in effect.target_list:
+                self.remove_effect(effect)
+
+    def remove_caster_effects(self, caster):
+        """Called when a caster is downed. Handles EFFECT_CASTER_DEATH for all caster effects.
+        0 = remove instantly on down, 1 = continue ghost ticking (TICK_OWNER=1 only),
+        2 = immortal, leave untouched."""
+        for effect in list(self.active_effects):
+            if effect.caster != caster:
+                continue
+            death_behavior = effect.AttrValDict.get("EFFECT_CASTER_DEATH", 0)
+            if death_behavior == 0:
+                self.remove_effect(effect)
+            # death_behavior == 1: ghost ticking — resolved via resolve_ghost_caster_turns (TICK_OWNER=1 only)
+            # death_behavior == 2: immortal, leave untouched
+
+    def handle_unit_downed(self, unit):
+        """Called when a unit transitions to downed state (0 HP, revivable).
+        Removes effects based on EFFECT_TARGET_DEATH and EFFECT_CASTER_DEATH."""
+        # Handle effects where this unit is the target
+        for effect in list(self.active_effects):
+            if unit not in effect.target_list:
+                continue
+            target_death = effect.AttrValDict.get("EFFECT_TARGET_DEATH", 0)
+            print(f"Handling downed unit {unit.name} for effect {effect.ABILITY_NAME}, target_death={target_death}")
+            if target_death == 0:
+                self.remove_effect(effect)
+            # target_death == 1: keep effect, expires on permanent death
+        # Handle effects where this unit is the caster
+        self.remove_caster_effects(unit)
+
+    def handle_unit_dead(self, unit):
+        """Called on permanent death. Removes all remaining effects on or cast by the unit."""
+        for effect in list(self.active_effects):
+            if unit in effect.target_list or effect.caster == unit:
+                self.remove_effect(effect)
+
+    def resolve_ghost_caster_turns(self, caster):
+        """Fires EFFECT_CASTER_DEATH=1 effects for a specific downed caster,
+        at the point in the turn order where they would have acted."""
+        self.cleanup_expired_effects()
+        for effect in list(self.active_effects):
+            if effect.caster != caster:
+                continue
+            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in (0, 1, 2):
+                continue
+            if effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 1:
+                continue
+            if effect.AttrValDict.get("EFFECT_CASTER_DEATH", 0) != 1:
+                continue
+            effect.turns_left -= 1
+            for target in list(effect.target_list):
+                effect.cast_on_target(target, caster)
+            if effect.turns_left == 0:
                 self.remove_effect(effect)
 
     def resolve_turn_start(self, unit):

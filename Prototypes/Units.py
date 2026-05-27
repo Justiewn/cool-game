@@ -1,16 +1,4 @@
 """Construction: x = Unit(name (str), team (int))
-
-Class methods
-    - Unit.num_units(team, all_or_alive): returns the len() of one of four team lists (team zero/one, all/alive)
-    - Unit.get_units(all_or_alive, team): returns one of four team lists (team zero/one, all/alive)
-    - Unit.kill_unit(unit): removes unit from its respective team alive list
-    - Unit.remove_all(): clears all unit lists of units, called at end of game in main()
-    - Unit.downed(): checks all units for dead units and calls unit.kill() on them
-
-Instance methods
-    - x.is_dead(): returns True if Unit has <0HP and changes x.alive = False. Else returns False
-    - x.choose_ai_move(): returns a valid move name string for an AI-controlled unit
-    - x.modify_effect_stack_dict(add_or_remove, effect_name): simple dict entry adder/remover used by ability.check_stacks and special methods (for removing effect on expiration)
 """
 import os
 import copy
@@ -35,7 +23,7 @@ class Unit:
         self.name = name
         self.team = team            #0= player , 1 = enemy
         self.alive = True       #use to determine if unit is allowed a move and is targetable
-        self.effect_stacks_dict = {}        #can only be modified by modify_effect_stack_dict, which is called at two points: in check_stack() and at ability expiration (in special method)
+        self.effect_stacks_dict = {}        #can only be modified by modify_effect_stack_dict, which is called 
 
         self._hp = 100                    #cannot surpass max_hp (stops at max in setter method)
         self._mp = 15                    #cannot surpass max_mp (stops at max in setter method)
@@ -52,6 +40,7 @@ class Unit:
 
         self.movesList = ["Rest", "Punch", "Bandage", "Uproar"]
 
+        self.dead = False                     # True = permanently removed, no revive possible
         self.target_Ability_queue = []                   #a list that contains all current abilities this unit is a target of
 
         ##ability specific attributes
@@ -110,20 +99,36 @@ class Unit:
         for l in [Unit.team_zero_list, Unit.team_zero_alive_list, Unit.team_one_list, Unit.team_one_alive_list]:
             l.clear()
 
-    # checks all units, if unit is_dead(), call kill_unit() and remove effects targeting them
+    # checks all units; transitions alive units at 0 HP to downed state
     @classmethod
-    def downed(cls, battle=None):
+    def process_downed(cls, battle=None):
         for team in [Unit.team_zero_list, Unit.team_one_list]:
             for unit in team[:]:
-                if unit.is_dead():
-                    if unit in Unit.team_zero_alive_list or unit in Unit.team_one_alive_list:
-                        Unit.kill_unit(unit)
-                        time.sleep(0.4)
-                        print("{} is down!\n".format(str(unit)))
-                        if battle is not None:
-                            battle.remove_target_effects(unit)
+                if unit.hp <= 0 and unit.alive and not unit.dead:
+                    unit.alive = False
+                    Unit.kill_unit(unit)
+                    time.sleep(0.4)
+                    print("{} is down!\n".format(str(unit)))
+                    if battle is not None:
+                        battle.handle_unit_downed(unit)
+
+    @classmethod
+    def permanently_kill(cls, unit, battle=None):
+        """Permanently removes a unit (e.g. no revive possible). Called explicitly; not triggered by HP."""
+        unit.dead = True
+        unit.alive = False
+        for lst in [Unit.team_zero_list, Unit.team_zero_alive_list, Unit.team_one_list, Unit.team_one_alive_list]:
+            if unit in lst:
+                lst.remove(unit)
+        if battle is not None:
+            battle.handle_unit_dead(unit)
 
 #~~~~~~~~~~~~Instance methods~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    @property
+    def downed(self):
+        """True when the unit is at 0 HP but not permanently dead (revivable)."""
+        return not self.alive and not self.dead
 
     #checks if hp of a unit is <= 0, if True, self.alive = False and return True
     def is_dead(self):

@@ -6,3 +6,5 @@ Prototypes/.vs/ProjectSettings.json
 Prototypes/.vs/slnx.sqlite
 Prototypes/.vscode/settings.json
 Prototypes/.vscode/launch.json
+build/
+dist/

@@ -4,6 +4,11 @@ import pygame
 import random
 import sys
 import time
+
+
+def _resource_path(relative):
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, relative)
 from battle import Battle
 from Units import Unit, Unit_Knight, Unit_Thief, Unit_Priest, Unit_Berserker, Unit_Assassin
 from Abilities import Ability
@@ -193,7 +198,7 @@ class GameGUI:
         return fallback
 
     def load_scenario_images(self):
-        scenarios_dir = os.path.join(os.path.dirname(__file__), "images", "scenarios")
+        scenarios_dir = _resource_path(os.path.join("images", "scenarios"))
         for scenario in self.SCENARIOS:
             filename = scenario["name"].lower().replace(" ", "_") + ".png"
             path = os.path.join(scenarios_dir, filename)
@@ -225,7 +230,7 @@ class GameGUI:
         return result
 
     def load_unit_portraits(self):
-        portraits_dir = os.path.join(os.path.dirname(__file__), "images", "portraits")
+        portraits_dir = _resource_path(os.path.join("images", "portraits"))
         mapping = {
             "Thug": "thug.png",
             "Knight": "knight.png",
@@ -246,7 +251,7 @@ class GameGUI:
         return portraits
 
     def play_bgm(self, folder):
-        bgm_dir = os.path.join(os.path.dirname(__file__), "sounds", "bgm", folder)
+        bgm_dir = _resource_path(os.path.join("sounds", "bgm", folder))
         if not os.path.isdir(bgm_dir):
             return
         tracks = [f for f in os.listdir(bgm_dir) if f.lower().endswith(('.mp3', '.ogg', '.wav'))]
@@ -260,7 +265,7 @@ class GameGUI:
         pygame.mixer.music.play()
 
     def load_sounds(self):
-        sounds_dir = os.path.join(os.path.dirname(__file__), "sounds", "effects")
+        sounds_dir = _resource_path(os.path.join("sounds", "effects"))
         for ability_name, attrs in Ability.AbilitiesDict.items():
             cast_sound = attrs.get("CAST_SOUND") if isinstance(attrs, dict) else None
             if cast_sound:
@@ -278,7 +283,7 @@ class GameGUI:
                 self.sounds[name] = pygame.mixer.Sound(path)
             except Exception:
                 pass
-        menu_click_path = os.path.join(os.path.dirname(__file__), "sounds", "menu_click.mp3")
+        menu_click_path = _resource_path(os.path.join("sounds", "menu_click.mp3"))
         try:
             self.sounds["menu_click"] = pygame.mixer.Sound(menu_click_path)
         except Exception:
@@ -505,31 +510,39 @@ class GameGUI:
             self.info_text = self.get_winner_text()
             return
 
-        alive_team = Unit.get_units("alive", self.current_team)
-        if not alive_team:
+        active_team = [u for u in Unit.get_units("all", self.current_team) if not u.dead]
+        if not active_team:
             self.current_team = 1 - self.current_team
             self.current_index = 0
-            alive_team = Unit.get_units("alive", self.current_team)
+            active_team = [u for u in Unit.get_units("all", self.current_team) if not u.dead]
 
-        if not alive_team:
+        if not active_team:
             self.game_over = True
             self.info_text = self.get_winner_text()
             return
 
-        if self.current_index >= len(alive_team):
+        if self.current_index >= len(active_team):
             self.current_team = 1 - self.current_team
             self.current_index = 0
-            alive_team = Unit.get_units("alive", self.current_team)
-            if not alive_team:
+            active_team = [u for u in Unit.get_units("all", self.current_team) if not u.dead]
+            if not active_team:
                 self.game_over = True
                 self.info_text = self.get_winner_text()
                 return
 
-        self.current_unit = alive_team[self.current_index]
+        self.current_unit = active_team[self.current_index]
+
+        if self.current_unit.downed:
+            self.battle.resolve_ghost_caster_turns(self.current_unit)
+            Unit.process_downed(self.battle)
+            self.current_index += 1
+            self.next_turn()
+            return
+
         self.current_unit_target_team = 1 - self.current_team
         self.battle.resolve_turn_start(self.current_unit)
         self.battle.resolve_before_action(self.current_unit)
-        Unit.downed(self.battle)
+        Unit.process_downed(self.battle)
         if self.battle.is_battle_over():
             self.game_over = True
             self.info_text = self.get_winner_text()
@@ -549,9 +562,9 @@ class GameGUI:
         self.action_buttons.clear()
         moves = self.current_unit.movesList
 
-        alive_team = Unit.get_units("alive", self.current_unit.team)
+        visible_team = [u for u in Unit.get_units("all", self.current_unit.team) if not u.dead]
         try:
-            unit_index = alive_team.index(self.current_unit)
+            unit_index = visible_team.index(self.current_unit)
         except ValueError:
             unit_index = 0
         max_total = max(Unit.num_units(0, "all"), Unit.num_units(1, "all"), 1)
@@ -639,7 +652,7 @@ class GameGUI:
                 pygame.time.set_timer(HIT_SOUND_EVENT, 40, loops=1)
         self.battle.resolve_after_action(self.current_unit)
         self.battle.resolve_turn_end(self.current_unit)
-        Unit.downed(self.battle)
+        Unit.process_downed(self.battle)
         self.log("")
         pygame.time.set_timer(NEXT_TURN_EVENT, 200, loops=1)
 
@@ -673,8 +686,8 @@ class GameGUI:
         return spacing, card_h
 
     def draw_units(self, mouse_pos):
-        player_units = Unit.get_units("alive", 0)
-        enemy_units = Unit.get_units("alive", 1)
+        player_units = [u for u in Unit.get_units("all", 0) if not u.dead]
+        enemy_units = [u for u in Unit.get_units("all", 1) if not u.dead]
         max_total = max(Unit.num_units(0, "all"), Unit.num_units(1, "all"), 1)
         spacing, card_h = self._get_slot_layout(max_total)
         screen_h = self.screen.get_height()
@@ -775,7 +788,16 @@ class GameGUI:
         for key in [k for k in self.unit_effect_rects if k[0] is unit]:
             del self.unit_effect_rects[key]
         self.unit_effect_area_rects.pop(unit, None)
-        if unit.effect_stacks_dict:
+        if unit.effect_stacks_dict or unit.downed:
+            if unit.downed:
+                label = "Downed"
+                text_w = SMALL_FONT.size(label)[0]
+                pill_w = text_w + pill_pad * 2
+                pill_rect = pygame.Rect(pill_x, effect_y, pill_w, pill_h)
+                pygame.draw.rect(self.screen, (160, 40, 40), pill_rect, border_radius=3)
+                self.screen.blit(SMALL_FONT.render(label, True, WHITE), (pill_x + pill_pad, effect_y + 2))
+                self.unit_effect_rects[(unit, "Downed")] = pill_rect
+                pill_x += pill_w + pill_gap
             for status, stacks in unit.effect_stacks_dict.items():
                 label = f"{status} x{stacks}" if stacks > 1 else status
                 text_w = SMALL_FONT.size(label)[0]
@@ -837,6 +859,8 @@ class GameGUI:
             return {}
 
     def get_unit_card_fill(self, unit, rect, mouse_pos, hovered_ability_targets, available_hover_targets):
+        if unit.downed:
+            return (90, 90, 90)
         fill_color = LIGHT_GRAY
         if hovered_ability_targets and unit in hovered_ability_targets and self.hovered_ability_info.get("target_type") == 0:
             fill_color = (255, 255, 170)

@@ -8,10 +8,18 @@ import random
 from random import randint
 import math
 import json
+import os
+import sys
 from Units import Unit
 
+
+def _resource_path(relative):
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, relative)
+
+
 # Load ability data from JSON file
-with open('abilities.json', 'r') as f:
+with open(_resource_path('abilities.json'), 'r') as f:
     ability_data = json.load(f)
 AbilitiesDict = ability_data['AbilitiesDict']
 
@@ -175,7 +183,8 @@ class Ability():
         success = None
         if not self.ability_dodged(target):                                 #if abiltiy hits (i.e. ability_dodged = False)
             if self.AttrValDict["IS_SPECIAL"]:              #put it first in order because ..
-                success = self.special_sorter(target, caster)                           
+                success = self.special_sorter(target, caster)  
+                print( "success? " + str(success) )                         
                 if success == None:                                                                     #if success == None (i.e. not False)
                     if self.AttrValDict["IS_EFFECT"] and self.turns_left == 0:                                     #if ability was an effect AND ability is expiring
                         target.modify_effect_stack_dict("remove", self.AttrValDict["EFFECT_STATUS"])                    #remove this effect stack
@@ -196,8 +205,6 @@ class Ability():
         else:
             success = False  
             self.turns_left = 0                                                                     #set turns_left to 0 to be deleted by check_Ability_queue()
-        if self.AttrValDict["IS_EFFECT"]:                                             #return success to signal if check_stats should be called in initial_cast()
-            return success
         return success
 
     def calculate_dmg(self, caster, dmg_type):        #uses DMG_BASE, DMG_ROLL, and caster.ATK/caster.MAGIC to calculate and return raw_damage
