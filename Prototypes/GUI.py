@@ -81,7 +81,7 @@ def draw_text(surface, text, rect, font, color=BLACK, align="topleft"):
 
 
 class Button:
-    def __init__(self, rect, text, action=None, color=BUTTON_COLOR, hover_color=BUTTON_HOVER, tooltip="", right_text=""):
+    def __init__(self, rect, text, action=None, color=BUTTON_COLOR, hover_color=BUTTON_HOVER, tooltip="", right_text="", icon=None):
         self.rect = pygame.Rect(rect)
         self.text = text
         self.action = action
@@ -89,17 +89,18 @@ class Button:
         self.hover_color = hover_color
         self.tooltip = tooltip
         self.right_text = right_text
+        self.icon = icon   # optional pygame.Surface drawn centred instead of text
         self.hover = False
 
     def draw(self, surface):
         fill = self.hover_color if self.hover else self.color
         pygame.draw.rect(surface, fill, self.rect, border_radius=6)
         pygame.draw.rect(surface, BLACK, self.rect, 2, border_radius=6)
-        if self.text:
+        if self.icon:
+            icon_rect = self.icon.get_rect(center=self.rect.center)
+            surface.blit(self.icon, icon_rect)
+        elif self.text:
             text_surface = FONT.render(self.text, True, BUTTON_TEXT)
-            # if self.right_text:
-            #     text_rect = text_surface.get_rect(midleft=(self.rect.x + 12, self.rect.centery))
-            # else:
             text_rect = text_surface.get_rect(center=self.rect.center)
             surface.blit(text_surface, text_rect)
         if self.right_text:
@@ -188,6 +189,21 @@ class GameGUI:
         self.quit_confirm = False
         self.quit_buttons = []
         self._setup_quit_buttons()
+        # Settings
+        self.settings_open = False
+        self.settings_tab = 'visual'   # 'visual' | 'audio'
+        self.bgm_volume = 0.5
+        self.sfx_volume = 1.0
+        self.fps = 30
+        self.fullscreen = False
+        self._dragging_slider = None   # 'bgm' | 'sfx' | None
+        self.settings_button = None
+        self.settings_tab_buttons = []
+        self._settings_close_btn = None
+        self._settings_fullscreen_btn = None
+        self._settings_fps_btn = None
+        self._slider_rects = {}        # updated each frame by draw_settings_overlay
+        self._setup_settings_ui()
         self.play_bgm('selection')
 
     def create_fallback_portrait(self):
@@ -260,7 +276,7 @@ class GameGUI:
         self._bgm_folder = folder
         track = os.path.join(bgm_dir, random.choice(tracks))
         pygame.mixer.music.load(track)
-        pygame.mixer.music.set_volume(0.5)
+        pygame.mixer.music.set_volume(self.bgm_volume)
         pygame.mixer.music.set_endevent(MUSIC_END_EVENT)
         pygame.mixer.music.play()
 
@@ -415,6 +431,190 @@ class GameGUI:
             Button((cx - 110, cy + 10, 100, 44), "Yes", self._do_quit, color=RED),
             Button((cx + 10, cy + 10, 100, 44), "No", self._cancel_quit, color=GREEN),
         ]
+
+    def _setup_settings_ui(self):
+        try:
+            _cog_raw = pygame.image.load(_resource_path(os.path.join("images", "settings-cog.png"))).convert_alpha()
+            _cog_icon = pygame.transform.smoothscale(_cog_raw, (26, 26))
+        except Exception:
+            _cog_icon = None
+        BTN_SIZE = 40
+        self.settings_button = Button(
+            (WIDTH - BTN_SIZE - 8, 8, BTN_SIZE, BTN_SIZE), "",
+            lambda: setattr(self, 'settings_open', True),
+            color=LIGHT_GRAY, hover_color=(65, 65, 65),
+            icon=_cog_icon,
+        )
+        # Placeholder rects — real positions set each frame in draw_settings_overlay
+        _r = pygame.Rect(0, 0, 1, 1)
+        self.settings_tab_buttons = [
+            Button(_r.copy(), "Visual", lambda: setattr(self, 'settings_tab', 'visual'), color=DARK_GRAY, hover_color=(65, 65, 65)),
+            Button(_r.copy(), "Audio",  lambda: setattr(self, 'settings_tab', 'audio'),  color=DARK_GRAY, hover_color=(65, 65, 65)),
+            Button(_r.copy(), "Quit",   lambda: setattr(self, 'settings_tab', 'quit'),   color=DARK_GRAY, hover_color=(65, 65, 65)),
+        ]
+        self._settings_close_btn      = Button(_r.copy(), "X", lambda: setattr(self, 'settings_open', False), color=(160, 40, 40), hover_color=(200, 60, 60))
+        self._settings_fullscreen_btn = Button(_r.copy(), "", self._toggle_fullscreen, color=DARK_GRAY, hover_color=(65, 65, 65))
+        self._settings_fps_btn        = Button(_r.copy(), "", self._toggle_fps,        color=DARK_GRAY, hover_color=(65, 65, 65))
+        self._settings_quit_sel_btn   = Button(_r.copy(), "Quit to Selection", self._settings_do_quit_to_sel, color=(160, 100, 30), hover_color=(200, 130, 40))
+        self._settings_quit_game_btn  = Button(_r.copy(), "Quit Game",         self._do_quit,                color=(160, 40,  40), hover_color=(200, 60,  60))
+        self._slider_rects = {}
+
+    def _settings_do_quit_to_sel(self):
+        self.settings_open = False
+        self.go_to_selection()
+
+    def _toggle_fullscreen(self):
+        self.fullscreen = not self.fullscreen
+        flags = pygame.FULLSCREEN if self.fullscreen else 0
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
+        self._setup_settings_ui()
+        self._setup_game_over_buttons()
+        self._setup_pause_buttons()
+        self._setup_quit_buttons()
+
+    def _toggle_fps(self):
+        self.fps = 60 if self.fps == 30 else 30
+
+    def draw_settings_overlay(self):
+        # Dark backdrop
+        overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 170))
+        self.screen.blit(overlay, (0, 0))
+
+        # Modal box
+        BOX_W, BOX_H = 500, 360
+        cx, cy = WIDTH // 2, HEIGHT // 2
+        box = pygame.Rect(cx - BOX_W // 2, cy - BOX_H // 2, BOX_W, BOX_H)
+        pygame.draw.rect(self.screen, DARK_GRAY, box, border_radius=12)
+        pygame.draw.rect(self.screen, LIGHT_GRAY, box, width=2, border_radius=12)
+
+        # Title bar — cog icon + "Settings" text
+        title_surf = TITLE_FONT.render("Settings", True, WHITE)
+        title_y = box.y + 14
+        cog_icon = getattr(self.settings_button, 'icon', None)
+        if cog_icon:
+            cog_scaled = pygame.transform.smoothscale(cog_icon, (TITLE_FONT.get_linesize(), TITLE_FONT.get_linesize()))
+            self.screen.blit(cog_scaled, (box.x + 20, title_y))
+            self.screen.blit(title_surf, (box.x + 20 + cog_scaled.get_width() + 8, title_y))
+        else:
+            self.screen.blit(title_surf, (box.x + 20, title_y))
+
+        # Close button (✕)
+        close_rect = pygame.Rect(box.right - 46, box.y + 10, 34, 34)
+        self._settings_close_btn.rect = close_rect
+        mouse_pos = pygame.mouse.get_pos()
+        self._settings_close_btn.update(mouse_pos)
+        self._settings_close_btn.draw(self.screen)
+
+        # Tab row
+        TAB_Y = box.y + 54
+        TAB_H = 36
+        TAB_PAD_X = 4
+        tab_w = BOX_W // 3
+        tab_labels = ['visual', 'audio', 'quit']
+        for i, (btn, label) in enumerate(zip(self.settings_tab_buttons, tab_labels)):
+            tab_rect = pygame.Rect(box.x + i * tab_w + TAB_PAD_X, TAB_Y, tab_w - TAB_PAD_X * 2, TAB_H)
+            btn.rect = tab_rect
+            active = (self.settings_tab == label)
+            fill = BLUE if active else DARK_GRAY
+            hover_fill = (90, 150, 200) if active else (65, 65, 65)
+            btn.color = fill
+            btn.hover_color = hover_fill
+            btn.update(mouse_pos)
+            btn.draw(self.screen)
+        # Tab underline
+        pygame.draw.line(self.screen, LIGHT_GRAY, (box.x, TAB_Y + TAB_H), (box.right, TAB_Y + TAB_H), 1)
+
+        # Content area
+        CONTENT_Y = TAB_Y + TAB_H + 20
+        CONTENT_X = box.x + 30
+        ROW_H = 52
+        BTN_W, BTN_H = 200, 36
+
+        if self.settings_tab == 'visual':
+            # --- Fullscreen toggle ---
+            fs_label = FONT.render("Fullscreen", True, WHITE)
+            self.screen.blit(fs_label, (CONTENT_X, CONTENT_Y + 8))
+            fs_btn_rect = pygame.Rect(box.right - 30 - BTN_W, CONTENT_Y, BTN_W, BTN_H)
+            self._settings_fullscreen_btn.rect = fs_btn_rect
+            self._settings_fullscreen_btn.text = "ON" if self.fullscreen else "OFF"
+            self._settings_fullscreen_btn.color = GREEN if self.fullscreen else (100, 100, 100)
+            self._settings_fullscreen_btn.hover_color = (100, 210, 140) if self.fullscreen else (130, 130, 130)
+            self._settings_fullscreen_btn.update(mouse_pos)
+            self._settings_fullscreen_btn.draw(self.screen)
+
+            # --- FPS toggle ---
+            fps_label = FONT.render("FPS Cap", True, WHITE)
+            self.screen.blit(fps_label, (CONTENT_X, CONTENT_Y + ROW_H + 8))
+            fps_btn_rect = pygame.Rect(box.right - 30 - BTN_W, CONTENT_Y + ROW_H, BTN_W, BTN_H)
+            self._settings_fps_btn.rect = fps_btn_rect
+            self._settings_fps_btn.text = f"{self.fps} FPS"
+            self._settings_fps_btn.color = DARK_GRAY
+            self._settings_fps_btn.hover_color = (65, 65, 65)
+            self._settings_fps_btn.update(mouse_pos)
+            self._settings_fps_btn.draw(self.screen)
+
+        elif self.settings_tab == 'audio':
+            TRACK_W, TRACK_H = 260, 14
+            TRACK_X = box.right - 30 - TRACK_W
+
+            for i, (key, label, volume) in enumerate([
+                ('bgm', 'Music Volume', self.bgm_volume),
+                ('sfx', 'SFX Volume',   self.sfx_volume),
+            ]):
+                row_y = CONTENT_Y + i * ROW_H
+                # Label
+                lbl_surf = FONT.render(label, True, WHITE)
+                self.screen.blit(lbl_surf, (CONTENT_X, row_y + 8))
+                # Percentage
+                pct_surf = SMALL_FONT.render(f"{int(volume * 100)}%", True, LIGHT_GRAY)
+                self.screen.blit(pct_surf, (TRACK_X - 46, row_y + 10))
+                # Track background
+                track_rect = pygame.Rect(TRACK_X, row_y + (ROW_H - TRACK_H) // 2, TRACK_W, TRACK_H)
+                pygame.draw.rect(self.screen, (70, 70, 70), track_rect, border_radius=7)
+                # Filled portion
+                fill_w = max(0, int(TRACK_W * volume))
+                if fill_w > 0:
+                    fill_rect = pygame.Rect(track_rect.x, track_rect.y, fill_w, TRACK_H)
+                    pygame.draw.rect(self.screen, BLUE, fill_rect, border_radius=7)
+                # Handle circle
+                handle_x = track_rect.x + fill_w
+                pygame.draw.circle(self.screen, WHITE, (handle_x, track_rect.centery), 9)
+                pygame.draw.circle(self.screen, BLUE,  (handle_x, track_rect.centery), 7)
+                self._slider_rects[key] = track_rect
+
+        elif self.settings_tab == 'quit':
+            QUIT_BTN_W, QUIT_BTN_H = BOX_W - 60, 48
+            # Quit to Selection
+            qs_rect = pygame.Rect(box.x + 30, CONTENT_Y, QUIT_BTN_W, QUIT_BTN_H)
+            self._settings_quit_sel_btn.rect = qs_rect
+            if self.state == 'team_select':
+                # Already on selection — grey out
+                self._settings_quit_sel_btn.color       = (80, 80, 80)
+                self._settings_quit_sel_btn.hover_color = (80, 80, 80)
+            else:
+                self._settings_quit_sel_btn.color       = (160, 100, 30)
+                self._settings_quit_sel_btn.hover_color = (200, 130, 40)
+            self._settings_quit_sel_btn.update(mouse_pos)
+            self._settings_quit_sel_btn.draw(self.screen)
+            # Quit Game
+            qg_rect = pygame.Rect(box.x + 30, CONTENT_Y + QUIT_BTN_H + 16, QUIT_BTN_W, QUIT_BTN_H)
+            self._settings_quit_game_btn.rect = qg_rect
+            self._settings_quit_game_btn.update(mouse_pos)
+            self._settings_quit_game_btn.draw(self.screen)
+
+    def _apply_slider(self, key, mouse_x):
+        track = self._slider_rects.get(key)
+        if not track:
+            return
+        ratio = max(0.0, min(1.0, (mouse_x - track.left) / track.width))
+        if key == 'bgm':
+            self.bgm_volume = ratio
+            pygame.mixer.music.set_volume(ratio)
+        elif key == 'sfx':
+            self.sfx_volume = ratio
+            for snd in self.sounds.values():
+                snd.set_volume(ratio)
 
     def _do_quit(self):
         self.running = False
@@ -1021,6 +1221,11 @@ class GameGUI:
             self.draw_scenario_preview()
         if self.quit_confirm:
             self.draw_quit_overlay()
+        mouse_pos_s = pygame.mouse.get_pos() if not self.quit_confirm else (-1, -1)
+        self.settings_button.update(mouse_pos_s)
+        self.settings_button.draw(self.screen)
+        if self.settings_open:
+            self.draw_settings_overlay()
         pygame.display.flip()
 
     def draw_scenario_preview(self):
@@ -1108,6 +1313,11 @@ class GameGUI:
             self.draw_game_over_overlay()
         elif self.paused:
             self.draw_pause_overlay()
+        mouse_pos_s = pygame.mouse.get_pos() if not (self.game_over or self.paused) else (-1, -1)
+        self.settings_button.update(mouse_pos_s)
+        self.settings_button.draw(self.screen)
+        if self.settings_open:
+            self.draw_settings_overlay()
         pygame.display.flip()
 
     def draw_buttons(self):
@@ -1155,12 +1365,14 @@ class GameGUI:
     def run(self):
         try:
             while self.running:
-                self.clock.tick(FPS)
+                self.clock.tick(self.fps)
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         self.running = False
                     if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                        if self.state == 'battle' and not self.game_over:
+                        if self.settings_open:
+                            self.settings_open = False
+                        elif self.state == 'battle' and not self.game_over:
                             self.paused = not self.paused
                         elif self.state == 'team_select':
                             self.quit_confirm = not self.quit_confirm
@@ -1224,13 +1436,42 @@ class GameGUI:
                             pygame.time.set_timer(NEXT_TURN_EVENT, 0)
                             self.current_index += 1
                             self.next_turn()
+                    if event.type == pygame.MOUSEMOTION and self._dragging_slider:
+                        self._apply_slider(self._dragging_slider, event.pos[0])
+                    if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                        self._dragging_slider = None
                     if event.type == pygame.MOUSEWHEEL and self.state == 'battle':
                         _vis_h = self.screen.get_height() - 50
                         line_height = SMALL_FONT.get_linesize()
                         max_lines = _vis_h // line_height
                         self.log_scroll = max(0, min(self.log_scroll - event.y, max(0, len(self.message_log) - max_lines)))
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                        if self.state == 'battle':
+                        # ── Settings modal (intercepts all other clicks when open) ──
+                        if self.settings_open:
+                            if self._settings_close_btn.rect.collidepoint(event.pos):
+                                self._settings_close_btn.click()
+                            for btn in self.settings_tab_buttons:
+                                if btn.rect.collidepoint(event.pos):
+                                    btn.click()
+                            if self.settings_tab == 'visual':
+                                if self._settings_fullscreen_btn.rect.collidepoint(event.pos):
+                                    self._settings_fullscreen_btn.click()
+                                if self._settings_fps_btn.rect.collidepoint(event.pos):
+                                    self._settings_fps_btn.click()
+                            elif self.settings_tab == 'audio':
+                                for key, track in self._slider_rects.items():
+                                    if track.collidepoint(event.pos):
+                                        self._dragging_slider = key
+                                        self._apply_slider(key, event.pos[0])
+                            elif self.settings_tab == 'quit':
+                                if self._settings_quit_sel_btn.rect.collidepoint(event.pos) and self.state != 'team_select':
+                                    self._settings_quit_sel_btn.click()
+                                if self._settings_quit_game_btn.rect.collidepoint(event.pos):
+                                    self._settings_quit_game_btn.click()
+                        # ── Settings gear button ─────────────────────────────────
+                        elif self.settings_button and self.settings_button.rect.collidepoint(event.pos):
+                            self.settings_button.click()
+                        elif self.state == 'battle':
                             if self.paused:
                                 for button in self.pause_buttons:
                                     if button.rect.collidepoint(event.pos):
