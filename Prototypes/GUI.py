@@ -51,12 +51,23 @@ SMALL_FONT = pygame.font.SysFont("arial", 14)
 
 # Battle layout constants (relative to native WIDTH)
 OUTER_PADDING = 30
-LOG_PANEL_W = 300
-PLAYER_CARD_X = 30
-CARD_W = 300
-ENEMY_CARD_X = WIDTH - LOG_PANEL_W - 30 - CARD_W
+LOG_PANEL_W = 300                  # kept for compatibility; not used by new layout
+# Vertical-column battle layout
+BATTLE_COLUMN_W = 280              # card width inside a team column
+BATTLE_COLUMN_PAD = 30             # outer padding from screen edge
+ACTION_BTN_W = 210                 # ability button width
+ACTION_BTN_GAP = 10                # gap between card edge and action button column
+PLAYER_CARD_X = BATTLE_COLUMN_PAD
+CARD_W = BATTLE_COLUMN_W
+ENEMY_CARD_X = WIDTH - BATTLE_COLUMN_PAD - BATTLE_COLUMN_W
+# Battle log (small box at bottom centre)
+LOG_BOX_W = 620
+LOG_BOX_H = 150
+LOG_BOX_MARGIN_BOTTOM = 18
 # Selection layout constants
-SEL_SLOT_W = 220
+SEL_SLOT_W = 320
+SEL_SLOT_H = 100
+SEL_SLOT_SPACING = 120
 SEL_P_X = 180
 SEL_E_X = WIDTH - 180 - SEL_SLOT_W
 LOG_PANEL_H = 0  # unused, kept for compatibility
@@ -223,7 +234,12 @@ class GameGUI:
                 small = pygame.transform.smoothscale(img, (1100, 800))
                 small = self._apply_fade_mask(small)
                 self.scenario_images[scenario["name"]] = small
-                full = pygame.transform.smoothscale(img, (WIDTH-500, HEIGHT-200))
+                # Battle-screen background: fits between the two team columns and above the log box.
+                playfield_w = WIDTH - 2 * (BATTLE_COLUMN_PAD + BATTLE_COLUMN_W + ACTION_BTN_GAP + ACTION_BTN_W)
+                playfield_w = max(playfield_w, 600)
+                full_w = int(playfield_w * 0.95)
+                full_h = int((HEIGHT - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM - 60) * 0.95)
+                full = pygame.transform.smoothscale(img, (full_w, full_h))
                 full = self._apply_fade_mask(full, corner_radius=30, fade_width=50)
                 self.scenario_images_fullscreen[scenario["name"]] = full
             except Exception:
@@ -339,7 +355,7 @@ class GameGUI:
     def setup_team_selection(self):
         MAX_TEAM = 5
         P_X, E_X = SEL_P_X, SEL_E_X
-        SLOT_W, SLOT_H, SLOT_SPACING, SLOT_Y = 220, 70, 90, 180
+        SLOT_W, SLOT_H, SLOT_SPACING, SLOT_Y = SEL_SLOT_W, SEL_SLOT_H, SEL_SLOT_SPACING, 180
 
         self.selection_buttons.clear()
         self.remove_slot_buttons = []
@@ -363,7 +379,7 @@ class GameGUI:
                                                        color=(190, 80, 80), hover_color=(220, 100, 100)))
         if len(self.enemy_team) > 1:
             for i in range(len(self.enemy_team)):
-                rect = (E_X + 180, SLOT_Y + i * SLOT_SPACING + btn_cy_offset, 22, 26)
+                rect = (E_X + SLOT_W - 40, SLOT_Y + i * SLOT_SPACING + btn_cy_offset, 22, 26)
                 self.remove_slot_buttons.append(Button(rect, "×", lambda i=i: self._remove_slot('enemy', i),
                                                        color=(190, 80, 80), hover_color=(220, 100, 100)))
 
@@ -768,20 +784,23 @@ class GameGUI:
         except ValueError:
             unit_index = 0
         max_total = max(Unit.num_units(0, "all"), Unit.num_units(1, "all"), 1)
-        spacing, card_h = self._get_slot_layout(max_total)
-        card_w = spacing - 10
-        screen_h = self.screen.get_height()
+        v_spacing, card_w, card_h = self._get_slot_layout(max_total)
         is_player = self.current_unit.team == 0
-        card_x = (30 + OUTER_PADDING + unit_index * spacing) if is_player else (WIDTH - LOG_PANEL_W - 30 - OUTER_PADDING - card_w - unit_index * spacing)
-        card_y = (screen_h - 10 - OUTER_PADDING - card_h) if is_player else (10 + OUTER_PADDING)
+        card_x = PLAYER_CARD_X if is_player else ENEMY_CARD_X
+        card_y = BATTLE_COLUMN_PAD + unit_index * v_spacing
 
         BTN_H = 38
-        BTN_GAP = 5
-        BTN_W = card_w
+        BTN_GAP = 6
+        BTN_W = ACTION_BTN_W
+        # Player: buttons stack to the right of the card. Enemy: to the left.
+        if is_player:
+            btn_x = card_x + card_w + ACTION_BTN_GAP
+        else:
+            btn_x = card_x - ACTION_BTN_GAP - BTN_W
 
         other_moves = [m for m in moves if m != "Rest"]
         has_rest = "Rest" in moves
-        # Rest nearest to card, then other moves
+        # Rest nearest to card (= first), then other moves below
         ordered = (["Rest"] + other_moves) if has_rest else other_moves
 
         for i, move in enumerate(ordered):
@@ -795,11 +814,8 @@ class GameGUI:
                     mp_cost = Ability.get_attr(move, "MP_COST") or 0
             except Exception:
                 tooltip, mp_cost = "", 0
-            if is_player:
-                btn_y = card_y - (i + 1) * (BTN_H + BTN_GAP)
-            else:
-                btn_y = card_y + card_h + BTN_GAP + i * (BTN_H + BTN_GAP)
-            rect = (card_x, btn_y, BTN_W, BTN_H)
+            btn_y = card_y + i * (BTN_H + BTN_GAP)
+            rect = (btn_x, btn_y, BTN_W, BTN_H)
             right_text = f"MP {mp_cost}" if move != "Rest" else ""
             not_enough_mp = move != "Rest" and mp_cost > self.current_unit.mp
             btn_color = (90, 90, 90) if not_enough_mp else BUTTON_COLOR
@@ -877,20 +893,19 @@ class GameGUI:
         pygame.time.set_timer(AI_SHOW_EVENT, 600, loops=1)
 
     def _get_slot_layout(self, team_size):
-        """Returns (spacing, card_h) for horizontal card layout."""
-        available_w = WIDTH - LOG_PANEL_W - 60  # 30px margins each side
+        """Returns (v_spacing, card_w, card_h) for a vertical column of unit cards."""
+        available_h = HEIGHT - 2 * BATTLE_COLUMN_PAD - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM
         gap = 10
-        card_w = max(120, min(300, (available_w - (max(team_size, 1) - 1) * gap) // max(team_size, 1)))
-        spacing = card_w + gap
-        card_h = 170
-        return spacing, card_h
+        n = max(team_size, 1)
+        card_h = max(90, min(170, (available_h - (n - 1) * gap) // n))
+        v_spacing = card_h + gap
+        return v_spacing, BATTLE_COLUMN_W, card_h
 
     def draw_units(self, mouse_pos):
         player_units = [u for u in Unit.get_units("all", 0) if not u.dead]
         enemy_units = [u for u in Unit.get_units("all", 1) if not u.dead]
         max_total = max(Unit.num_units(0, "all"), Unit.num_units(1, "all"), 1)
-        spacing, card_h = self._get_slot_layout(max_total)
-        screen_h = self.screen.get_height()
+        v_spacing, card_w, card_h = self._get_slot_layout(max_total)
         hovered_unit = None
         self.card_rects = []
         available_hover_targets = self.available_targets or []
@@ -899,24 +914,24 @@ class GameGUI:
         if self.hovered_ability_button and not self.available_targets and self.current_unit:
             hovered_ability_targets = self.get_available_targets_for_move(self.hovered_ability_button.text)
             self.hovered_ability_info = self.get_hovered_ability_info(self.hovered_ability_button.text)
-        card_w = spacing - 10
-        # Player team: bottom row, spread left to right
-        player_row_y = screen_h - 10 - OUTER_PADDING - card_h
+        # Player team: left column, stacked top → bottom
+        col_top = BATTLE_COLUMN_PAD
         for index, unit in enumerate(player_units):
-            card_x = 30 + OUTER_PADDING + index * spacing
-            rect = pygame.Rect(card_x, player_row_y, card_w, card_h)
+            card_x = PLAYER_CARD_X
+            card_y = col_top + index * v_spacing
+            rect = pygame.Rect(card_x, card_y, card_w, card_h)
             fill = self.get_unit_card_fill(unit, rect, mouse_pos, hovered_ability_targets, available_hover_targets)
-            self.draw_unit_card(unit, card_x, player_row_y, GREEN, fill, hovered_ability_targets, card_h, card_w)
+            self.draw_unit_card(unit, card_x, card_y, GREEN, fill, hovered_ability_targets, card_h, card_w)
             self.card_rects.append((rect, unit))
             if rect.collidepoint(mouse_pos):
                 hovered_unit = unit
-        # Enemy team: top row, spread right to left
-        enemy_row_y = 10 + OUTER_PADDING
+        # Enemy team: right column, stacked top → bottom
         for index, unit in enumerate(enemy_units):
-            card_x = WIDTH - LOG_PANEL_W - 30 - OUTER_PADDING - card_w - index * spacing
-            rect = pygame.Rect(card_x, enemy_row_y, card_w, card_h)
+            card_x = ENEMY_CARD_X
+            card_y = col_top + index * v_spacing
+            rect = pygame.Rect(card_x, card_y, card_w, card_h)
             fill = self.get_unit_card_fill(unit, rect, mouse_pos, hovered_ability_targets, available_hover_targets)
-            self.draw_unit_card(unit, card_x, enemy_row_y, RED, fill, hovered_ability_targets, card_h, card_w)
+            self.draw_unit_card(unit, card_x, card_y, RED, fill, hovered_ability_targets, card_h, card_w)
             self.card_rects.append((rect, unit))
             if rect.collidepoint(mouse_pos):
                 hovered_unit = unit
@@ -1017,16 +1032,19 @@ class GameGUI:
         return rect
 
     def draw_info_panel(self):
-        log_x = WIDTH - LOG_PANEL_W
-        log_h = self.screen.get_height()
-        info_rect = pygame.Rect(log_x, 0, LOG_PANEL_W, log_h)
-        pygame.draw.rect(self.screen, LOG_BG, info_rect)
-        pygame.draw.rect(self.screen, BLACK, info_rect, 2)
+        log_x = (WIDTH - LOG_BOX_W) // 2
+        log_y = HEIGHT - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM
+        info_rect = pygame.Rect(log_x, log_y, LOG_BOX_W, LOG_BOX_H)
+        log_surface = pygame.Surface((LOG_BOX_W, LOG_BOX_H), pygame.SRCALPHA)
+        log_surface.fill((LOG_BG[0], LOG_BG[1], LOG_BG[2], 170))
+        self.screen.blit(log_surface, (log_x, log_y))
+        pygame.draw.rect(self.screen, BLACK, info_rect, 2, border_radius=6)
         title = TITLE_FONT.render("Battle Log", True, WHITE)
-        self.screen.blit(title, (log_x + LOG_PANEL_W // 2 - title.get_width() // 2, 12))
+        self.screen.blit(title, (log_x + LOG_BOX_W // 2 - title.get_width() // 2, log_y + 6))
         pad = 10
-        visible_height = log_h - 50
-        log_rect = pygame.Rect(log_x + pad, 48, LOG_PANEL_W - pad * 2, visible_height)
+        header_h = TITLE_FONT.get_linesize() + 8
+        visible_height = LOG_BOX_H - header_h - pad
+        log_rect = pygame.Rect(log_x + pad, log_y + header_h, LOG_BOX_W - pad * 2, visible_height)
         line_height = SMALL_FONT.get_linesize()
         max_lines = visible_height // line_height
         start_index = max(0, min(self.log_scroll, max(0, len(self.message_log) - max_lines)))
@@ -1037,7 +1055,8 @@ class GameGUI:
             self.screen.blit(clipped, (log_rect.x, log_rect.y + i * line_height))
         if len(self.message_log) > max_lines:
             scroll_text = SMALL_FONT.render(f"{start_index + 1}-{min(start_index + max_lines, len(self.message_log))}/{len(self.message_log)}", True, LOG_TEXT)
-            self.screen.blit(scroll_text, (log_x + LOG_PANEL_W // 2 - scroll_text.get_width() // 2, log_h - line_height - 6))
+            self.screen.blit(scroll_text, (log_x + LOG_BOX_W - scroll_text.get_width() - 8, log_y + 8))
+        self._log_box_rect = info_rect
 
     def get_available_targets_for_move(self, move_name):
         if not self.current_unit:
@@ -1233,18 +1252,22 @@ class GameGUI:
         self.screen.blit(self.scenario_preview_image, img_rect)
 
     def draw_team_preview(self, team, x, y):
+        ICON_SIZE = 76
         for index, class_key in enumerate(team):
             button_index = index if x < WIDTH // 2 else len(self.player_team) + index
             button = self.selection_buttons[button_index]
             fill = button.hover_color if button.hover else button.color
-            card = pygame.Rect(x, y + index * 90, 220, 70)
-            pygame.draw.rect(self.screen, fill, card, border_radius=5)
-            pygame.draw.rect(self.screen, BLACK, card, 2, border_radius=5)
-            self.draw_class_icon(class_key, x + 12, y + index * 90 + 15)
-            label = FONT.render(self.CLASS_NAMES[class_key], True, BLACK)
-            self.screen.blit(label, (x + 75, y + index * 90 + 24))
-            detail = SMALL_FONT.render("Click to change", True, DARK_GRAY)
-            self.screen.blit(detail, (x + 75, y + index * 90 + 44))
+            row_y = y + index * SEL_SLOT_SPACING
+            card = pygame.Rect(x, row_y, SEL_SLOT_W, SEL_SLOT_H)
+            pygame.draw.rect(self.screen, fill, card, border_radius=8)
+            pygame.draw.rect(self.screen, BLACK, card, 2, border_radius=8)
+            icon_y = row_y + (SEL_SLOT_H - ICON_SIZE) // 2
+            self.draw_class_icon(class_key, x + 14, icon_y, size=ICON_SIZE)
+            text_x = x + 14 + ICON_SIZE + 14
+            label = TITLE_FONT.render(self.CLASS_NAMES[class_key], True, BLACK)
+            self.screen.blit(label, (text_x, row_y + 22))
+            detail = FONT.render("Click to change", True, DARK_GRAY)
+            self.screen.blit(detail, (text_x, row_y + 52))
 
     def draw_class_icon(self, class_key, x, y, size=50):
         frame = pygame.Rect(x, y, size, size)
@@ -1290,7 +1313,10 @@ class GameGUI:
     def draw_battle_screen(self):
         self.screen.fill(TRUE_BLACK)
         if self.scenario_preview_image_fullscreen is not None:
-            self.screen.blit(self.scenario_preview_image_fullscreen, (100, 100))
+            img = self.scenario_preview_image_fullscreen
+            bg_x = (WIDTH - img.get_width()) // 2
+            bg_y = (HEIGHT - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM - img.get_height()) // 2
+            self.screen.blit(img, (bg_x, bg_y))
         elif self.scenario_preview_image is not None:
             self.draw_scenario_preview()
         self.draw_buttons()
@@ -1441,9 +1467,9 @@ class GameGUI:
                     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                         self._dragging_slider = None
                     if event.type == pygame.MOUSEWHEEL and self.state == 'battle':
-                        _vis_h = self.screen.get_height() - 50
                         line_height = SMALL_FONT.get_linesize()
-                        max_lines = _vis_h // line_height
+                        header_h = TITLE_FONT.get_linesize() + 8
+                        max_lines = max(1, (LOG_BOX_H - header_h - 10) // line_height)
                         self.log_scroll = max(0, min(self.log_scroll - event.y, max(0, len(self.message_log) - max_lines)))
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                         # ── Settings modal (intercepts all other clicks when open) ──
