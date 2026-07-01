@@ -1,4 +1,5 @@
 import builtins
+import math
 import os
 import pygame
 import random
@@ -31,6 +32,7 @@ DARK_GRAY = (45, 45, 45)
 LIGHT_GRAY = (200, 200, 200)
 BLUE = (70, 130, 180)
 GREEN = (80, 190, 120)
+DARK_GREEN = (40, 130, 50)      # Poison damage splash colour
 RED = (220, 80, 80)
 
 BUTTON_COLOR = (70, 130, 180)
@@ -64,6 +66,11 @@ ENEMY_CARD_X = WIDTH - BATTLE_COLUMN_PAD - BATTLE_COLUMN_W
 LOG_BOX_W = 620
 LOG_BOX_H = 150
 LOG_BOX_MARGIN_BOTTOM = 18
+
+# Hotkeys: first ability = Q, second = W, ...   first target = 1, second = 2, ...
+ABILITY_HOTKEY_LABELS = ["Q", "W", "E", "R", "T", "Y"]
+ABILITY_HOTKEY_KEYS = [pygame.K_q, pygame.K_w, pygame.K_e, pygame.K_r, pygame.K_t, pygame.K_y]
+TARGET_HOTKEY_KEYS = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5]
 # Selection layout constants
 SEL_SLOT_W = 320
 SEL_SLOT_H = 100
@@ -92,7 +99,7 @@ def draw_text(surface, text, rect, font, color=BLACK, align="topleft"):
 
 
 class Button:
-    def __init__(self, rect, text, action=None, color=BUTTON_COLOR, hover_color=BUTTON_HOVER, tooltip="", right_text="", icon=None):
+    def __init__(self, rect, text, action=None, color=BUTTON_COLOR, hover_color=BUTTON_HOVER, tooltip="", right_text="", icon=None, left_text=""):
         self.rect = pygame.Rect(rect)
         self.text = text
         self.action = action
@@ -100,6 +107,7 @@ class Button:
         self.hover_color = hover_color
         self.tooltip = tooltip
         self.right_text = right_text
+        self.left_text = left_text
         self.icon = icon   # optional pygame.Surface drawn centred instead of text
         self.hover = False
 
@@ -118,6 +126,16 @@ class Button:
             cost_surface = SMALL_FONT.render(self.right_text, True, BUTTON_TEXT)
             cost_rect = cost_surface.get_rect(midright=(self.rect.right - 10, self.rect.centery))
             surface.blit(cost_surface, cost_rect)
+        if self.left_text:
+            # Hotkey pill: small dark badge with the key letter
+            pad = 8
+            hk_surface = SMALL_FONT.render(self.left_text, True, WHITE)
+            badge_w = hk_surface.get_width() + 10
+            badge_h = hk_surface.get_height() + 4
+            badge_rect = pygame.Rect(self.rect.x + pad, self.rect.centery - badge_h // 2, badge_w, badge_h)
+            pygame.draw.rect(surface, (30, 30, 30), badge_rect, border_radius=4)
+            pygame.draw.rect(surface, WHITE, badge_rect, 1, border_radius=4)
+            surface.blit(hk_surface, hk_surface.get_rect(center=badge_rect.center))
 
     def update(self, mouse_pos):
         self.hover = self.rect.collidepoint(mouse_pos)
@@ -152,6 +170,18 @@ class GameGUI:
         self.ai_toggle_button = None
         self.current_unit = None
         self.available_targets = None
+        self.hotkey_abilities = []
+        # Damage/heal splash + animated bar state
+        self.unit_last_hp = {}     # id(unit) -> HP at last frame
+        self.unit_display_hp = {}  # id(unit) -> current animated HP
+        self.unit_display_mp = {}  # id(unit) -> current animated MP
+        self.hp_splashes = []      # list of dicts: unit, amount, color, spawn_t, y_off
+        self.shake_state = {}      # id(unit) -> {spawn_t, duration}
+        self.nudge_state = {}      # id(unit) -> {spawn_t, duration}
+        # Per-unit ordered list of pill anim entries: {"status", "stacks", "phase", "start_t"}.
+        # phase in {"in", "steady", "out"}; "out" pills stay in the list until fade completes.
+        self.pill_states = {}
+        self._last_frame_t = time.time()
         self.card_rects = []
         self.hovered_ability_button = None
         self.hovered_ability_info = {}
@@ -309,7 +339,8 @@ class GameGUI:
         for name, filename in (("hit_sharp_no_dmg", "hit_sharp_no_dmg.mp3"), ("hit_sharp_light", "hit_sharp_light.mp3"), ("hit_sharp_medium", "hit_sharp_medium.mp3"), ("hit_sharp_heavy", "hit_sharp_heavy.mp3"),
                                ("hit_blunt_no_dmg", "hit_blunt_no_dmg.mp3"), ("hit_blunt_light", "hit_blunt_light.mp3"), ("hit_blunt_medium", "hit_blunt_medium.mp3"), ("hit_blunt_heavy", "hit_blunt_heavy.mp3"),
                                ("hit_magic_no_dmg", "hit_magic_no_dmg.mp3"), ("hit_magic_light", "hit_magic_light.mp3"), ("hit_magic_medium", "hit_magic_medium.mp3"), ("hit_magic_heavy", "hit_magic_heavy.mp3"),
-                               ("miss", "miss.wav")):
+                               ("miss", "miss.wav"),
+                               ("poison_tick", "poison_tick.mp3")):
             path = os.path.join(sounds_dir, filename)
             try:
                 self.sounds[name] = pygame.mixer.Sound(path)
@@ -350,6 +381,16 @@ class GameGUI:
 
         self.message_log.clear()
         self.log_scroll = 0
+        # Reset splash + bar-animation state so trackers don't reference stale unit ids
+        self.unit_last_hp.clear()
+        self.unit_display_hp.clear()
+        self.unit_display_mp.clear()
+        self.hp_splashes.clear()
+        self.shake_state.clear()
+        self.nudge_state.clear()
+        self.pill_states.clear()
+        Ability._combat_events.clear()
+        self._last_frame_t = time.time()
         self.log("Battle begins!")
 
     def setup_team_selection(self):
@@ -787,7 +828,8 @@ class GameGUI:
         v_spacing, card_w, card_h = self._get_slot_layout(max_total)
         is_player = self.current_unit.team == 0
         card_x = PLAYER_CARD_X if is_player else ENEMY_CARD_X
-        card_y = BATTLE_COLUMN_PAD + unit_index * v_spacing
+        col_top = self._column_top_y(len(visible_team), v_spacing, card_h)
+        card_y = col_top + unit_index * v_spacing
 
         BTN_H = 38
         BTN_GAP = 6
@@ -803,6 +845,7 @@ class GameGUI:
         # Rest nearest to card (= first), then other moves below
         ordered = (["Rest"] + other_moves) if has_rest else other_moves
 
+        self.hotkey_abilities = list(ordered)   # index → move name
         for i, move in enumerate(ordered):
             def make_action(move_name=move):
                 return lambda: self.select_move(move_name)
@@ -817,12 +860,13 @@ class GameGUI:
             btn_y = card_y + i * (BTN_H + BTN_GAP)
             rect = (btn_x, btn_y, BTN_W, BTN_H)
             right_text = f"MP {mp_cost}" if move != "Rest" else ""
+            left_text = ABILITY_HOTKEY_LABELS[i] if i < len(ABILITY_HOTKEY_LABELS) else ""
             not_enough_mp = move != "Rest" and mp_cost > self.current_unit.mp
             btn_color = (90, 90, 90) if not_enough_mp else BUTTON_COLOR
             btn_hover = (110, 110, 110) if not_enough_mp else BUTTON_HOVER
             self.action_buttons.append(Button(rect, move, make_action(), color=btn_color,
                                             hover_color=btn_hover, tooltip=tooltip,
-                                            right_text=right_text))
+                                            right_text=right_text, left_text=left_text))
 
     def select_move(self, move_name):
         if self.game_over:
@@ -852,6 +896,8 @@ class GameGUI:
         cast_snd = self.sounds.get(self.selected_ability.ABILITY_NAME)
         if cast_snd:
             cast_snd.play()
+        # Nudge the caster's card toward centre briefly to sell the "cast" motion
+        self.nudge_state[id(self.current_unit)] = {"spawn_t": time.time(), "duration": 0.45}
         success = self.selected_ability.initial_cast(targets, self.current_unit, self.battle)
         if success is False:
             miss_snd = self.sounds.get("miss")
@@ -879,17 +925,15 @@ class GameGUI:
 
     def execute_enemy_ai(self):
         self.action_locked = True
-        move_name = self.current_unit.choose_ai_move()
-        if move_name is None:
+        from ai import choose_action
+        move_name, targets = choose_action(self.battle, self.current_unit)
+        if not move_name or not targets:
             self.log(f"{self.current_unit} cannot act.")
             self.ai_pending_targets = []
             pygame.time.set_timer(AI_CAST_EVENT, 200, loops=1)
             return
         self.selected_ability = Ability(move_name, Ability.ability_ID_counter)
-        available_targets = self.selected_ability.get_valid_targets(self.current_unit)
-        if self.selected_ability.AttrValDict["TARGET_TYPE"] == 1 and available_targets:
-            available_targets = [random.choice(available_targets)]
-        self.ai_pending_targets = available_targets
+        self.ai_pending_targets = targets
         pygame.time.set_timer(AI_SHOW_EVENT, 600, loops=1)
 
     def _get_slot_layout(self, team_size):
@@ -900,6 +944,50 @@ class GameGUI:
         card_h = max(90, min(170, (available_h - (n - 1) * gap) // n))
         v_spacing = card_h + gap
         return v_spacing, BATTLE_COLUMN_W, card_h
+
+    def _get_shake_offset(self, unit):
+        """Returns (dx, dy) for a shaking card. Decays from full amplitude to 0
+        over the shake duration."""
+        state = self.shake_state.get(id(unit))
+        if not state:
+            return 0, 0
+        elapsed = time.time() - state["spawn_t"]
+        dur = state["duration"]
+        if elapsed >= dur:
+            return 0, 0
+        amp = 9 * (1 - elapsed / dur)   # start at ~9px, decay to 0
+        # Two out-of-phase sinusoids give a scrambled shake instead of a bounce
+        dx = int(math.sin(elapsed * 70.0) * amp)
+        dy = int(math.cos(elapsed * 55.0) * amp * 0.5)
+        return dx, dy
+
+    def _get_nudge_offset(self, unit):
+        """Returns dx for the 'lunge toward centre' motion of a casting unit.
+        Player team (team 0) nudges right; enemy team (team 1) nudges left."""
+        state = self.nudge_state.get(id(unit))
+        if not state:
+            return 0
+        elapsed = time.time() - state["spawn_t"]
+        dur = state["duration"]
+        if elapsed >= dur:
+            return 0
+        t = elapsed / dur
+        # Fast out, slow back: peak amount at t=0.3
+        peak = 0.3
+        if t < peak:
+            amount = (t / peak) ** 0.6
+        else:
+            amount = 1.0 - ((t - peak) / (1 - peak)) ** 1.6
+        direction = 1 if unit.team == 0 else -1
+        return int(8 * amount * direction)
+
+    def _column_top_y(self, team_units_visible, v_spacing, card_h):
+        """Vertical origin for a team's card column — centred in the playable band."""
+        top_edge = BATTLE_COLUMN_PAD
+        bottom_edge = HEIGHT - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM
+        n = max(team_units_visible, 1)
+        total_h = (n - 1) * v_spacing + card_h
+        return top_edge + max(0, (bottom_edge - top_edge - total_h) // 2)
 
     def draw_units(self, mouse_pos):
         player_units = [u for u in Unit.get_units("all", 0) if not u.dead]
@@ -914,11 +1002,15 @@ class GameGUI:
         if self.hovered_ability_button and not self.available_targets and self.current_unit:
             hovered_ability_targets = self.get_available_targets_for_move(self.hovered_ability_button.text)
             self.hovered_ability_info = self.get_hovered_ability_info(self.hovered_ability_button.text)
+        # Each team's column is centred vertically within the playable band above the log
+        player_top = self._column_top_y(len(player_units), v_spacing, card_h)
+        enemy_top  = self._column_top_y(len(enemy_units),  v_spacing, card_h)
         # Player team: left column, stacked top → bottom
-        col_top = BATTLE_COLUMN_PAD
         for index, unit in enumerate(player_units):
-            card_x = PLAYER_CARD_X
-            card_y = col_top + index * v_spacing
+            shake_dx, shake_dy = self._get_shake_offset(unit)
+            nudge_dx = self._get_nudge_offset(unit)
+            card_x = PLAYER_CARD_X + shake_dx + nudge_dx
+            card_y = player_top + index * v_spacing + shake_dy
             rect = pygame.Rect(card_x, card_y, card_w, card_h)
             fill = self.get_unit_card_fill(unit, rect, mouse_pos, hovered_ability_targets, available_hover_targets)
             self.draw_unit_card(unit, card_x, card_y, GREEN, fill, hovered_ability_targets, card_h, card_w)
@@ -927,8 +1019,10 @@ class GameGUI:
                 hovered_unit = unit
         # Enemy team: right column, stacked top → bottom
         for index, unit in enumerate(enemy_units):
-            card_x = ENEMY_CARD_X
-            card_y = col_top + index * v_spacing
+            shake_dx, shake_dy = self._get_shake_offset(unit)
+            nudge_dx = self._get_nudge_offset(unit)
+            card_x = ENEMY_CARD_X + shake_dx + nudge_dx
+            card_y = enemy_top + index * v_spacing + shake_dy
             rect = pygame.Rect(card_x, card_y, card_w, card_h)
             fill = self.get_unit_card_fill(unit, rect, mouse_pos, hovered_ability_targets, available_hover_targets)
             self.draw_unit_card(unit, card_x, card_y, RED, fill, hovered_ability_targets, card_h, card_w)
@@ -982,8 +1076,10 @@ class GameGUI:
         bar_h = max(14, min(20, card_h // 8))
         bar_w = card_w - 20
         mp_bar_width = int(bar_w * (unit.max_mp / 100))
-        hp_ratio = unit.hp / unit.max_hp if unit.max_hp else 0
-        mp_ratio = unit.mp / unit.max_mp if unit.max_mp else 0
+        disp_hp = self.unit_display_hp.get(id(unit), unit.hp)
+        disp_mp = self.unit_display_mp.get(id(unit), unit.mp)
+        hp_ratio = disp_hp / unit.max_hp if unit.max_hp else 0
+        mp_ratio = disp_mp / unit.max_mp if unit.max_mp else 0
         hp_y, mp_y = content_y, content_y + bar_h + 4
         hp_bar = pygame.Rect(x + 10, hp_y, int(bar_w * hp_ratio), bar_h)
         mp_bar = pygame.Rect(x + 10, mp_y, int(mp_bar_width * mp_ratio), bar_h)
@@ -991,8 +1087,8 @@ class GameGUI:
         pygame.draw.rect(self.screen, BLUE, mp_bar, border_radius=2)
         pygame.draw.rect(self.screen, BLACK, (x + 10, hp_y, bar_w, bar_h), 2, border_radius=2)
         pygame.draw.rect(self.screen, BLACK, (x + 10, mp_y, mp_bar_width, bar_h), 2, border_radius=2)
-        self.screen.blit(SMALL_FONT.render(f"{unit.hp}/{unit.max_hp}", True, BLACK), (x + 14, hp_y + 1))
-        self.screen.blit(SMALL_FONT.render(f"{unit.mp}/{unit.max_mp}", True, BLACK), (x + 14, mp_y + 1))
+        self.screen.blit(SMALL_FONT.render(f"{int(round(disp_hp))}/{unit.max_hp}", True, BLACK), (x + 14, hp_y + 1))
+        self.screen.blit(SMALL_FONT.render(f"{int(round(disp_mp))}/{unit.max_mp}", True, BLACK), (x + 14, mp_y + 1))
         effect_y_start = mp_y + bar_h + 6
         effect_y = effect_y_start
         pill_h = SMALL_FONT.get_linesize() + 4
@@ -1003,18 +1099,36 @@ class GameGUI:
         for key in [k for k in self.unit_effect_rects if k[0] is unit]:
             del self.unit_effect_rects[key]
         self.unit_effect_area_rects.pop(unit, None)
-        if unit.effect_stacks_dict or unit.downed:
+        # Iterate the animated pill list (may include entries whose stack was already
+        # removed but are still fading out). Falls back to raw state on the first
+        # frame before _update_pill_animations has run.
+        tracked = self.pill_states.get(id(unit))
+        if tracked is None:
+            tracked = []
             if unit.downed:
-                label = "Downed"
-                text_w = SMALL_FONT.size(label)[0]
-                pill_w = text_w + pill_pad * 2
-                pill_rect = pygame.Rect(pill_x, effect_y, pill_w, pill_h)
-                pygame.draw.rect(self.screen, (160, 40, 40), pill_rect, border_radius=3)
-                self.screen.blit(SMALL_FONT.render(label, True, WHITE), (pill_x + pill_pad, effect_y + 2))
-                self.unit_effect_rects[(unit, "Downed")] = pill_rect
-                pill_x += pill_w + pill_gap
+                tracked.append({"status": "__downed__", "stacks": 1, "phase": "steady", "start_t": 0})
             for status, stacks in unit.effect_stacks_dict.items():
-                label = f"{status} x{stacks}" if stacks > 1 else status
+                tracked.append({"status": status, "stacks": stacks, "phase": "steady", "start_t": 0})
+        if tracked:
+            now = time.time()
+            FADE = self.PILL_FADE_DUR
+            drew_any = False
+            for pill in tracked:
+                status = pill["status"]
+                is_downed = (status == "__downed__")
+                display_status = "Downed" if is_downed else status
+                stacks = pill["stacks"]
+                label = "Downed" if is_downed else (f"{status} x{stacks}" if stacks > 1 else status)
+                bg_color = (160, 40, 40) if is_downed else DARK_GRAY
+                elapsed = now - pill["start_t"]
+                if pill["phase"] == "in":
+                    alpha = int(255 * min(1.0, elapsed / FADE))
+                elif pill["phase"] == "out":
+                    alpha = int(255 * max(0.0, 1.0 - elapsed / FADE))
+                else:
+                    alpha = 255
+                if alpha <= 0:
+                    continue
                 text_w = SMALL_FONT.size(label)[0]
                 pill_w = text_w + pill_pad * 2
                 if pill_x + pill_w > x + card_w - 10:
@@ -1022,13 +1136,18 @@ class GameGUI:
                     effect_y += pill_h + 2
                 if effect_y + pill_h > y + card_h - 2:
                     break
+                # Compose the pill on an alpha surface so bg + text fade together
+                pill_surf = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
+                pygame.draw.rect(pill_surf, bg_color, pill_surf.get_rect(), border_radius=3)
+                pill_surf.blit(SMALL_FONT.render(label, True, WHITE), (pill_pad, 2))
+                pill_surf.set_alpha(alpha)
+                self.screen.blit(pill_surf, (pill_x, effect_y))
                 pill_rect = pygame.Rect(pill_x, effect_y, pill_w, pill_h)
-                pygame.draw.rect(self.screen, DARK_GRAY, pill_rect, border_radius=3)
-                self.screen.blit(SMALL_FONT.render(label, True, WHITE), (pill_x + pill_pad, effect_y + 2))
-                self.unit_effect_rects[(unit, status)] = pill_rect
+                self.unit_effect_rects[(unit, display_status)] = pill_rect
                 pill_x += pill_w + pill_gap
-            # bounding box covering entire pill area
-            self.unit_effect_area_rects[unit] = pygame.Rect(x + 10, effect_y_start, bar_w, effect_y + pill_h - effect_y_start)
+                drew_any = True
+            if drew_any:
+                self.unit_effect_area_rects[unit] = pygame.Rect(x + 10, effect_y_start, bar_w, effect_y + pill_h - effect_y_start)
         return rect
 
     def draw_info_panel(self):
@@ -1100,16 +1219,50 @@ class GameGUI:
             fill_color = (255, 190, 190)
         return fill_color
 
+    def _get_stat_modifiers(self, unit):
+        """Sums each stat's applied delta across all active effects targeting this unit.
+        Uses effect.sp_val (actual clamped changes) so the number matches what the
+        unit's stats really shifted by, not just what EFFECT_VALUES said on paper."""
+        mods = {}
+        for effect in self.battle.active_effects:
+            if unit not in effect.target_list:
+                continue
+            sp_val = getattr(effect, 'sp_val', None)
+            if not isinstance(sp_val, dict):
+                continue
+            for stat, delta in sp_val.items():
+                if delta:
+                    mods[stat] = mods.get(stat, 0) + delta
+        return mods
+
     def draw_unit_tooltip(self, unit, mouse_pos):
-        col_left  = [f"ATK: {unit.ATK}", f"MG ATK: {unit.MAGIC}", f"CRIT: {unit.CRIT}"]
-        col_right = [f"DEF: {unit.DEF}", f"MG DEF: {unit.MAGIC_DEF}", f"DODGE: {unit.DODGE}"]
+        mods = self._get_stat_modifiers(unit)
+        # (label, stat_attr) — stat_attr matches the keys used inside EFFECT_VALUES
+        left_stats  = [("ATK",    "ATK"),    ("MG ATK", "MAGIC"),     ("CRIT",  "CRIT")]
+        right_stats = [("DEF",    "DEF"),    ("MG DEF", "MAGIC_DEF"), ("DODGE", "DODGE")]
+
+        def base_text(label, stat_attr):
+            return f"{label}: {getattr(unit, stat_attr)}"
+
+        def mod_text(stat_attr):
+            m = mods.get(stat_attr, 0)
+            if m == 0:
+                return "", None
+            return (f" ({'+' if m > 0 else ''}{m})", GREEN if m > 0 else RED)
+
+        # Measure width including any modifier suffix so both columns align consistently
+        def line_width(label, stat_attr):
+            base = FONT.size(base_text(label, stat_attr))[0]
+            suffix, _ = mod_text(stat_attr)
+            return base + (FONT.size(suffix)[0] if suffix else 0)
+
         padding = 8
         col_gap = 16
         line_height = FONT.get_linesize()
-        col_left_w  = max(FONT.size(l)[0] for l in col_left)
-        col_right_w = max(FONT.size(l)[0] for l in col_right)
+        col_left_w  = max(line_width(l, a) for l, a in left_stats)
+        col_right_w = max(line_width(l, a) for l, a in right_stats)
         width  = padding + col_left_w + col_gap + col_right_w + padding
-        height = line_height * 3 + padding * 2
+        height = line_height * len(left_stats) + padding * 2
         tooltip_rect = pygame.Rect(mouse_pos[0] + 16, mouse_pos[1] + 16, width, height)
         if tooltip_rect.right > WIDTH:
             tooltip_rect.right = WIDTH - 10
@@ -1118,10 +1271,18 @@ class GameGUI:
         pygame.draw.rect(self.screen, LIGHT_GRAY, tooltip_rect, border_radius=6)
         pygame.draw.rect(self.screen, BLACK, tooltip_rect, 2, border_radius=6)
         rx, ry = tooltip_rect.x + padding, tooltip_rect.y + padding
-        for i, (left, right) in enumerate(zip(col_left, col_right)):
+
+        def draw_stat_line(x, y, label, stat_attr):
+            base_surf = FONT.render(base_text(label, stat_attr), True, BLACK)
+            self.screen.blit(base_surf, (x, y))
+            suffix, colour = mod_text(stat_attr)
+            if suffix:
+                self.screen.blit(FONT.render(suffix, True, colour), (x + base_surf.get_width(), y))
+
+        for i in range(len(left_stats)):
             y = ry + i * line_height
-            self.screen.blit(FONT.render(left,  True, BLACK), (rx, y))
-            self.screen.blit(FONT.render(right, True, BLACK), (rx + col_left_w + col_gap, y))
+            draw_stat_line(rx, y, *left_stats[i])
+            draw_stat_line(rx + col_left_w + col_gap, y, *right_stats[i])
 
     def ability_tooltip_lines(self, ability_name):
         lines = []
@@ -1310,6 +1471,217 @@ class GameGUI:
             button.update(mouse_pos)
             button.draw(self.screen)
 
+    def _update_hp_animations(self):
+        """Runs once per frame: detects HP/MP changes to spawn damage/heal splashes
+        and lerps the animated bar values toward the real ones."""
+        now = time.time()
+        dt = min(0.1, now - self._last_frame_t)  # clamp to avoid huge catch-up jumps
+        self._last_frame_t = now
+        # Drain queued combat events — non-damage messages (Blocked / Dodged) and
+        # source-attributed damage (Poison ticks) that need their own splash colour.
+        # attributed[id(unit)] is the total HP delta already accounted for by events,
+        # so the generic HP-delta detector below can subtract it and only splash
+        # anything left over.
+        attributed = {}
+        for evt in Ability._combat_events:
+            target = evt.get("target")
+            kind = evt.get("kind")
+            if target is None:
+                continue
+            if kind == "blocked":
+                self.hp_splashes.append({
+                    "unit": target, "text": "Blocked", "color": (210, 210, 235),
+                    "spawn_t": now, "small": True,
+                })
+            elif kind == "dodged":
+                self.hp_splashes.append({
+                    "unit": target, "text": "Dodged", "color": WHITE,
+                    "spawn_t": now, "small": True,
+                })
+            elif kind == "poison_tick":
+                amount = int(evt.get("amount", 0))
+                if amount <= 0:
+                    continue
+                self.hp_splashes.append({
+                    "unit": target, "text": f"-{amount}", "color": DARK_GREEN,
+                    "spawn_t": now,
+                })
+                attributed[id(target)] = attributed.get(id(target), 0) - amount
+                self.shake_state[id(target)] = {"spawn_t": now, "duration": 0.35}
+                snd = self.sounds.get("poison_tick")
+                if snd:
+                    snd.play()
+        Ability._combat_events.clear()
+        # Walk every non-permanently-dead unit
+        for team in (0, 1):
+            for unit in Unit.get_units("all", team):
+                if unit.dead:
+                    continue
+                uid = id(unit)
+                actual_hp = unit.hp
+                actual_mp = unit.mp
+                # Splash on unattributed HP delta (poison ticks etc. already
+                # spawned their own splash and reported the amount in `attributed`).
+                last_hp = self.unit_last_hp.get(uid, actual_hp)
+                raw_delta = actual_hp - last_hp
+                remaining = raw_delta - attributed.get(uid, 0)
+                if remaining != 0:
+                    color = GREEN if remaining > 0 else RED
+                    sign = "+" if remaining > 0 else "-"
+                    self.hp_splashes.append({
+                        "unit": unit,
+                        "text": f"{sign}{abs(remaining)}",
+                        "color": color,
+                        "spawn_t": now,
+                    })
+                    if remaining < 0:
+                        self.shake_state[uid] = {"spawn_t": now, "duration": 0.35}
+                self.unit_last_hp[uid] = actual_hp
+                # Lerp display values toward actual — visible drain at ~150 HP/sec (min)
+                for key, actual, store in (
+                    ("hp", actual_hp, self.unit_display_hp),
+                    ("mp", actual_mp, self.unit_display_mp),
+                ):
+                    if uid not in store:
+                        store[uid] = float(actual)
+                        continue
+                    disp = store[uid]
+                    diff = actual - disp
+                    if abs(diff) < 0.5:
+                        store[uid] = float(actual)
+                        continue
+                    rate = max(150.0, unit.max_hp * 1.5) if key == "hp" else max(30.0, unit.max_mp * 1.5)
+                    step = rate * dt
+                    if diff > 0:
+                        store[uid] = min(actual, disp + step)
+                    else:
+                        store[uid] = max(actual, disp - step)
+        # Prune expired splashes (lifetime 1s)
+        SPLASH_LIFE = 1.0
+        self.hp_splashes = [s for s in self.hp_splashes if now - s["spawn_t"] < SPLASH_LIFE]
+
+    PILL_FADE_DUR = 0.25
+
+    def _update_pill_animations(self):
+        """Mirrors each unit's effect_stacks_dict + downed flag into pill_states,
+        starting fade-in animations for new pills and fade-out for removed ones.
+        Fading-out pills stay in the list until the fade completes so they don't
+        pop off, and re-adding one that's still fading in redirects it back to steady."""
+        now = time.time()
+        FADE = self.PILL_FADE_DUR
+        for team in (0, 1):
+            for unit in Unit.get_units("all", team):
+                uid = id(unit)
+                if unit.dead:
+                    self.pill_states.pop(uid, None)
+                    continue
+                # Ground truth for this frame
+                current = []
+                if unit.downed:
+                    current.append(("__downed__", 1))
+                current.extend(unit.effect_stacks_dict.items())
+                current_set = {s for s, _ in current}
+                tracked = self.pill_states.setdefault(uid, [])
+                tracked_set = {p["status"] for p in tracked}
+                # Update existing entries: mark removed ones as fading out; refresh stacks/phase for still-present ones
+                for pill in tracked:
+                    status = pill["status"]
+                    if status not in current_set:
+                        if pill["phase"] != "out":
+                            pill["phase"] = "out"
+                            pill["start_t"] = now
+                    else:
+                        for s, n in current:
+                            if s == status:
+                                pill["stacks"] = n
+                                break
+                        if pill["phase"] == "out":
+                            # Re-added mid fade-out → revert to steady (no fresh fade-in)
+                            pill["phase"] = "steady"
+                # Append newly-appearing pills at the end (preserves insertion order)
+                for s, n in current:
+                    if s not in tracked_set:
+                        tracked.append({"status": s, "stacks": n, "phase": "in", "start_t": now})
+                # Prune fully-faded-out entries; promote finished fade-ins to steady
+                still_live = []
+                for pill in tracked:
+                    elapsed = now - pill["start_t"]
+                    if pill["phase"] == "out" and elapsed >= FADE:
+                        continue
+                    if pill["phase"] == "in" and elapsed >= FADE:
+                        pill["phase"] = "steady"
+                    still_live.append(pill)
+                tracked[:] = still_live
+
+    def _draw_hp_splashes(self):
+        """Draws floating damage/heal numbers rising from each unit's card."""
+        now = time.time()
+        SPLASH_LIFE = 1.0
+        RISE = 55  # pixels the number floats upward over its lifetime
+        # Group by unit so simultaneous hits stack rather than overlap
+        by_unit = {}
+        for s in self.hp_splashes:
+            by_unit.setdefault(id(s["unit"]), []).append(s)
+        for uid, splashes in by_unit.items():
+            card_rect = next((r for r, u in self.card_rects if id(u) == uid), None)
+            if not card_rect:
+                continue
+            # Newest at the bottom of the stack, oldest at the top
+            for stack_i, s in enumerate(reversed(splashes)):
+                elapsed = now - s["spawn_t"]
+                if elapsed >= SPLASH_LIFE:
+                    continue
+                t = elapsed / SPLASH_LIFE
+                alpha = int(255 * (1 - t))
+                y_off = int(-RISE * t) - stack_i * 22
+                font = FONT if s.get("small") else TITLE_FONT
+                surf = font.render(s["text"], True, s["color"])
+                # Outline for readability against any background
+                outline = font.render(s["text"], True, BLACK)
+                overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+                for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    overlay.blit(outline, (dx, dy))
+                overlay.blit(surf, (0, 0))
+                overlay.set_alpha(alpha)
+                r = overlay.get_rect(center=(card_rect.centerx, card_rect.top + 24 + y_off))
+                self.screen.blit(overlay, r)
+
+    def draw_target_hotkey_badges(self):
+        """Draws a pulsing glowing digit next to each available target card during target selection."""
+        if not self.available_targets:
+            return
+        # Pulse value in [0, 1] at ~2.5 Hz
+        pulse = (math.sin(time.time() * 5.0) + 1) * 0.5
+        for i, target in enumerate(self.available_targets):
+            if i >= len(TARGET_HOTKEY_KEYS):
+                break
+            # Find this target's card rect
+            card_rect = next((rect for rect, unit in self.card_rects if unit is target), None)
+            if not card_rect:
+                continue
+            digit = str(i + 1)
+            # Player cards are in the left column, enemies in the right column.
+            # Place the badge just outside the card, on the side facing the middle of the screen.
+            base_r = 22
+            r = int(base_r + pulse * 4)
+            if target.team == 0:
+                cx = card_rect.right + base_r + 6
+            else:
+                cx = card_rect.left - base_r - 6
+            cy = card_rect.centery
+            # Glow layers on an alpha surface, then digit on top
+            glow_size = (base_r + 12) * 2
+            glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+            center = (glow_size // 2, glow_size // 2)
+            outer_alpha = int(60 + pulse * 90)
+            inner_alpha = int(180 + pulse * 75)
+            pygame.draw.circle(glow_surf, (255, 215, 0, outer_alpha), center, r + 8)
+            pygame.draw.circle(glow_surf, (255, 215, 0, inner_alpha), center, r)
+            pygame.draw.circle(glow_surf, (255, 255, 255, 220), center, r, 2)
+            digit_surf = TITLE_FONT.render(digit, True, BLACK)
+            glow_surf.blit(digit_surf, digit_surf.get_rect(center=center))
+            self.screen.blit(glow_surf, (cx - glow_size // 2, cy - glow_size // 2))
+
     def draw_battle_screen(self):
         self.screen.fill(TRUE_BLACK)
         if self.scenario_preview_image_fullscreen is not None:
@@ -1319,9 +1691,17 @@ class GameGUI:
             self.screen.blit(img, (bg_x, bg_y))
         elif self.scenario_preview_image is not None:
             self.draw_scenario_preview()
+        if not self.paused:
+            self._update_hp_animations()
+            self._update_pill_animations()
+        else:
+            # Keep the frame timer sane while paused so we don't lurch on resume
+            self._last_frame_t = time.time()
         self.draw_buttons()
         mouse_pos = pygame.mouse.get_pos()
         hovered_unit = self.draw_units(mouse_pos)
+        self._draw_hp_splashes()
+        self.draw_target_hotkey_badges()
         self.draw_info_panel()
         if not self.paused:
             mouse_over_effect_area = any(r.collidepoint(mouse_pos) for r in self.unit_effect_area_rects.values())
@@ -1398,10 +1778,36 @@ class GameGUI:
                     if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                         if self.settings_open:
                             self.settings_open = False
+                        elif self.state == 'battle' and not self.game_over and self.available_targets and not self.action_locked:
+                            self.cancel_target_selection()
                         elif self.state == 'battle' and not self.game_over:
                             self.paused = not self.paused
                         elif self.state == 'team_select':
                             self.quit_confirm = not self.quit_confirm
+                    # Battle hotkeys: Q/W/E/R/T/Y for abilities, 1..5 for target selection.
+                    # Enemies are hotkey-controllable when their AI toggle is off.
+                    is_human_turn = (
+                        self.current_unit is not None
+                        and (self.current_unit.team == 0 or not self.enemy_ai_enabled)
+                    )
+                    if (event.type == pygame.KEYDOWN
+                            and self.state == 'battle'
+                            and not self.paused
+                            and not self.settings_open
+                            and not self.game_over
+                            and not self.action_locked
+                            and is_human_turn):
+                        if self.available_targets:
+                            # Target-selection mode: only digit keys pick a target.
+                            for i, key in enumerate(TARGET_HOTKEY_KEYS):
+                                if event.key == key and i < len(self.available_targets):
+                                    self.cast_selected_ability([self.available_targets[i]])
+                                    break
+                        else:
+                            for i, key in enumerate(ABILITY_HOTKEY_KEYS):
+                                if event.key == key and i < len(self.hotkey_abilities):
+                                    self.select_move(self.hotkey_abilities[i])
+                                    break
                     if event.type == MUSIC_END_EVENT:
                         if self._bgm_folder:
                             self.play_bgm(self._bgm_folder)

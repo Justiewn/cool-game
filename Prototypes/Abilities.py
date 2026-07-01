@@ -26,6 +26,8 @@ AbilitiesDict = ability_data['AbilitiesDict']
 class Ability():
     AbilitiesDict = AbilitiesDict  # Loaded from JSON
     ability_ID_counter = 0
+    # Non-damage combat events (blocked / dodged). GUI drains + clears each frame.
+    _combat_events = []
 
     @classmethod
     def _normalize_ability_entry(cls, ability_definition):
@@ -72,9 +74,10 @@ class Ability():
             if is_crit:
                 print("Critical hit! {} took {} {} damage!".format(str(target), final_damage, damage_message))
             else:
-                print("{} took {} {} damage!".format(str(target), final_damage, damage_message))       
+                print("{} took {} {} damage!".format(str(target), final_damage, damage_message))
         else:
             print("{} took no damage... {}".format(str(target), blocked_message))
+            cls._combat_events.append({"kind": "blocked", "target": target})
 
     #abilities that are 'heals' should use this
     @classmethod
@@ -239,6 +242,7 @@ class Ability():
             #print("Dodge is: {}".format(target.DODGE))                                 #for debugging
             if random.random() < target.DODGE/100:
                 print("{} dodged the attack!".format(str(target)))
+                Ability._combat_events.append({"kind": "dodged", "target": target})
                 return True
         return False
 
@@ -297,15 +301,20 @@ class Ability():
         if self.turns_left == self.AttrValDict["TICKS"]:
             minDMG, maxDMG = self.calculate_ability_dmg_range()
             damage = randint(minDMG,maxDMG) - math.floor(target.DEF)
-            if damage <= 0:
-                print("The poison dart bounced off {}... their DEF is too high!".format(str(target)))
-                return False
-            target.hp -= damage
-            print("{} took {} damage from a poison dart!".format(str(target), damage))
+            if damage > 0:
+                target.hp -= damage
+                print("{} took {} damage from a poison dart!".format(str(target), damage))
+            else:
+                # Dart glances off armour — no initial damage, but the poison
+                # still coats them and MP is still spent (block != free retry).
+                print("The poison dart glances off {}, but the toxin still clings.".format(str(target)))
+                Ability._combat_events.append({"kind": "blocked", "target": target})
         else:
             stacks = target.effect_stacks_dict.get(self.AttrValDict["EFFECT_STATUS"], 1)
             tick_damage = max(math.floor(target.hp * 0.15), 1)
             target.hp -= tick_damage
+            # Attribute this HP delta to poison so the GUI can colour the splash green.
+            Ability._combat_events.append({"kind": "poison_tick", "target": target, "amount": tick_damage})
             print("{} took {} damage from poison!".format(str(target), tick_damage))
             if self.turns_left == 0:
                 if target.hp > 0:
