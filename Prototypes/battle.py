@@ -28,6 +28,16 @@ class Battle:
             print(f"Removing effect {effect.ABILITY_NAME} from battle")
             self.active_effects.remove(effect)
         effect_status = effect.AttrValDict.get("EFFECT_STATUS")
+        # If this effect applied stat modifiers that haven't been reversed yet
+        # (e.g. caster/target was downed mid-buff), reverse them now.
+        needs_reversal = (
+            effect.AttrValDict.get("EFFECT_VALUES")
+            and isinstance(getattr(effect, 'sp_val', None), dict)
+            and not getattr(effect, '_stats_reversed', False)
+        )
+        if needs_reversal:
+            for target in effect.target_list:
+                effect.effect_stat_modifier("remove", target)
         for target in effect.target_list:
             if effect in target.target_Ability_queue:
                 print(f"Removing effect {effect.ABILITY_NAME} from target {target.name}'s queue")

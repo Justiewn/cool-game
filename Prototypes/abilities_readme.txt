@@ -76,7 +76,7 @@ false = tick fires regardless of dodge
 EFFECT_CASTER_DEATH (int)
 What happens to this effect when the caster is downed
 0 = effect is immediately removed when the caster is downed
-1 = effect continues as a ghost tick — fires once per round, at the start of each round, until it expires (only applies to EFFECT_TICK_OWNER = 1 effects)
+1 = effect continues as a ghost tick — fires at the point in the turn order where the downed caster would have acted, until it expires (only applies to EFFECT_TICK_OWNER = 1 effects)
 2 = effect is unaffected (immortal); caster death has no impact
 
 EFFECT_TARGET_DEATH (int)

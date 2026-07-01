@@ -179,17 +179,16 @@ class Ability():
         return success
 
     #Do basic mechanics using ABILITY_ATTRIBUTES to target
-    def cast_on_target(self, target, caster):          
+    def cast_on_target(self, target, caster):
         success = None
         if not self.ability_dodged(target):                                 #if abiltiy hits (i.e. ability_dodged = False)
             if self.AttrValDict["IS_SPECIAL"]:              #put it first in order because ..
-                success = self.special_sorter(target, caster)  
-                print( "success? " + str(success) )                         
-                if success == None:                                                                     #if success == None (i.e. not False)
-                    if self.AttrValDict["IS_EFFECT"] and self.turns_left == 0:                                     #if ability was an effect AND ability is expiring
-                        target.modify_effect_stack_dict("remove", self.AttrValDict["EFFECT_STATUS"])                    #remove this effect stack
-                elif success == False:                                                                  #elif move was unsuccessful
-                    self.turns_left = 0     
+                success = self.special_sorter(target, caster)
+                print( "success? " + str(success) )
+                # Stack removal on expiry is handled centrally in Battle.remove_effect;
+                # doing it here as well caused the pill count to drop by 2 per expiry.
+                if success == False:                                                                  #elif move was unsuccessful
+                    self.turns_left = 0
             dmg_type = self.AttrValDict["DMG_TYPE"]                                                                #set turns_left to 0 to be deleted by check_Ability_queue()
             if success is None and dmg_type in ["NORMAL", "MAGIC"]:
                 raw_damage = self.calculate_dmg(caster, dmg_type)
@@ -263,12 +262,14 @@ class Ability():
                     after = getattr(target, stat)
                     actual_changes[stat] = after - before   # may differ from value due to clamping
             self.sp_val = actual_changes
+            self._stats_reversed = False
         else:
             changes = self.sp_val if isinstance(self.sp_val, dict) else {}
             for stat, value in effect_values.items():
                 if value != 0:
                     actual = changes.get(stat, value)
                     setattr(target, stat, getattr(target, stat) - actual)
+            self._stats_reversed = True
 
 #----------------------Special instance methods----------------------------------------------------
     #This section contains all methods used by abilities that have unique mechanics not covered by basic ones
