@@ -12,6 +12,10 @@ class Unit:
     className = "Thug"
     player_name = "Player"
     name_pool = ["Brutus", "Rex", "Knuckles", "Mack", "Biff", "Sledge", "Dirk", "Crank"]
+    # Passives: names of abilities auto-triggered by Battle when their TRIGGER_ON
+    # event fires (e.g. "ALLY_DEATH"). Empty on the base class; overridden on
+    # subclasses that carry a passive kit.
+    passives = []
     team_zero_list = []
     team_zero_alive_list = []
     team_one_list = []
@@ -38,7 +42,7 @@ class Unit:
         self._DODGE = 5          # /100%
         self._SPEED = 10         # max speed is 20
 
-        self.movesList = ["Rest", "Punch", "Bandage", "Uproar"]
+        self.movesList = ["Rest", "Punch", "Tackle", "Riot"]
 
         self.dead = False                     # True = permanently removed, no revive possible
         self.target_Ability_queue = []                   #a list that contains all current abilities this unit is a target of
@@ -490,3 +494,15 @@ class Unit_Assassin(Unit):
 
     def __str__(self):
         return Unit_Assassin.className + " | " + self.name
+
+class Unit_Thug(Unit):
+
+    className = "Thug"
+    name_pool = ["Brutus", "Rex", "Knuckles", "Mack", "Biff", "Sledge", "Dirk", "Crank"]
+    passives = ["Uproar"]
+
+    def __init__(self, name, team):
+        super().__init__(name, team)
+
+    def __str__(self):
+        return Unit_Thug.className + " | " + self.name

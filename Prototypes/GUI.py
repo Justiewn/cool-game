@@ -3,6 +3,7 @@ import math
 import os
 import pygame
 import random
+import re
 import sys
 import time
 
@@ -11,7 +12,7 @@ def _resource_path(relative):
     base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, relative)
 from battle import Battle
-from Units import Unit, Unit_Knight, Unit_Thief, Unit_Priest, Unit_Berserker, Unit_Assassin
+from Units import Unit, Unit_Knight, Unit_Thief, Unit_Priest, Unit_Berserker, Unit_Assassin, Unit_Thug
 from Abilities import Ability
 
 # Pygame GUI for the turn-based battle prototype
@@ -40,6 +41,13 @@ BUTTON_HOVER = (90, 160, 205)
 BUTTON_TEXT = WHITE
 LOG_BG = (35, 35, 35)
 LOG_TEXT = (230, 230, 230)
+# Battle-log semantic colours
+LOG_NAME_COLOR    = (255, 215,   0)  # gold — unit names
+LOG_ABILITY_COLOR = (200, 150, 240)  # violet — ability names
+LOG_DMG_COLOR     = (230,  90,  90)  # red — damage taken
+LOG_HEAL_COLOR    = (110, 220, 130)  # green — heals
+LOG_BUFF_COLOR    = (110, 170, 240)  # blue — stat buffs
+LOG_DEBUFF_COLOR  = (240, 160,  60)  # orange — stat debuffs / stuns
 AI_CAST_EVENT = pygame.USEREVENT + 1
 AI_SHOW_EVENT = pygame.USEREVENT + 2
 NEXT_TURN_EVENT = pygame.USEREVENT + 3
@@ -64,7 +72,7 @@ CARD_W = BATTLE_COLUMN_W
 ENEMY_CARD_X = WIDTH - BATTLE_COLUMN_PAD - BATTLE_COLUMN_W
 # Battle log (small box at bottom centre)
 LOG_BOX_W = 620
-LOG_BOX_H = 150
+LOG_BOX_H = 200
 LOG_BOX_MARGIN_BOTTOM = 18
 
 # Hotkeys: first ability = Q, second = W, ...   first target = 1, second = 2, ...
@@ -99,7 +107,7 @@ def draw_text(surface, text, rect, font, color=BLACK, align="topleft"):
 
 
 class Button:
-    def __init__(self, rect, text, action=None, color=BUTTON_COLOR, hover_color=BUTTON_HOVER, tooltip="", right_text="", icon=None, left_text=""):
+    def __init__(self, rect, text, action=None, color=BUTTON_COLOR, hover_color=BUTTON_HOVER, tooltip="", right_text="", icon=None, left_text="", image_stacked=False, icon_left=False, label_font=None):
         self.rect = pygame.Rect(rect)
         self.text = text
         self.action = action
@@ -109,13 +117,43 @@ class Button:
         self.right_text = right_text
         self.left_text = left_text
         self.icon = icon   # optional pygame.Surface drawn centred instead of text
+        # When image_stacked is True the icon renders in the upper portion of
+        # the button and the text renders beneath it (used by the START button).
+        self.image_stacked = image_stacked
+        # When icon_left is True the icon renders on the left side of the button
+        # with the text to its right (used by the Enemy AI toggle).
+        self.icon_left = icon_left
+        self.label_font = label_font
         self.hover = False
 
     def draw(self, surface):
         fill = self.hover_color if self.hover else self.color
         pygame.draw.rect(surface, fill, self.rect, border_radius=6)
         pygame.draw.rect(surface, BLACK, self.rect, 2, border_radius=6)
-        if self.icon:
+        if self.icon and self.image_stacked:
+            font = self.label_font or FONT
+            label_h = font.get_linesize() if self.text else 0
+            pad = 10
+            icon_area_h = self.rect.height - label_h - pad * 2
+            self.icon.get_rect(midtop=(self.rect.centerx, self.rect.y + pad))
+            icon_rect = self.icon.get_rect(midtop=(self.rect.centerx, self.rect.y + pad))
+            surface.blit(self.icon, icon_rect)
+            if self.text:
+                label_surf = font.render(self.text, True, WHITE)
+                label_rect = label_surf.get_rect(midtop=(self.rect.centerx, self.rect.y + pad + icon_area_h))
+                surface.blit(label_surf, label_rect)
+        elif self.icon and self.icon_left and self.text:
+            font = self.label_font or FONT
+            pad = 10
+            icon_rect = self.icon.get_rect(midleft=(self.rect.x + pad, self.rect.centery))
+            surface.blit(self.icon, icon_rect)
+            text_x = icon_rect.right + pad
+            text_surface = font.render(self.text, True, WHITE)
+            # Centre the label in the remaining horizontal space
+            text_area_center_x = (text_x + self.rect.right - pad) // 2
+            text_rect = text_surface.get_rect(center=(text_area_center_x, self.rect.centery))
+            surface.blit(text_surface, text_rect)
+        elif self.icon:
             icon_rect = self.icon.get_rect(center=self.rect.center)
             surface.blit(self.icon, icon_rect)
         elif self.text:
@@ -218,6 +256,18 @@ class GameGUI:
             for attrs in Ability.AbilitiesDict.values()
             if attrs.get("EFFECT_STATUS") and attrs.get("EFFECT_TOOLTIP")
         }
+        # Effect statuses that prevent a unit from acting (stun / sleep / etc.)
+        self._incap_statuses = {
+            attrs["EFFECT_STATUS"]
+            for attrs in Ability.AbilitiesDict.values()
+            if attrs.get("PREVENTS_ACTION") and attrs.get("EFFECT_STATUS")
+        }
+        # Ability names sorted longest-first so multi-word matches (e.g. "Sword slash")
+        # win over partial single-word matches inside the same phrase.
+        self._ability_name_patterns = [
+            re.compile(r"(?<!\w)" + re.escape(name) + r"(?!\w)")
+            for name in sorted(Ability.AbilitiesDict.keys(), key=len, reverse=True)
+        ]
         self._bgm_folder = None
         self.original_print = builtins.print
         builtins.print = self._print_and_log
@@ -256,24 +306,38 @@ class GameGUI:
 
     def load_scenario_images(self):
         scenarios_dir = _resource_path(os.path.join("images", "scenarios"))
+        # Per-scenario current image index (which variant to show).
+        self.scenario_image_index = {s["name"]: 0 for s in self.SCENARIOS}
+        # Precompute the shared "fullscreen" dimensions once.
+        playfield_w = WIDTH - 2 * (BATTLE_COLUMN_PAD + BATTLE_COLUMN_W + ACTION_BTN_GAP + ACTION_BTN_W)
+        playfield_w = max(playfield_w, 600)
+        full_w = int(playfield_w * 0.95)
+        full_h = int((HEIGHT - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM - 60) * 0.95)
         for scenario in self.SCENARIOS:
-            filename = scenario["name"].lower().replace(" ", "_") + ".png"
-            path = os.path.join(scenarios_dir, filename)
-            try:
-                img = pygame.image.load(path).convert_alpha()
-                small = pygame.transform.smoothscale(img, (1100, 800))
-                small = self._apply_fade_mask(small)
-                self.scenario_images[scenario["name"]] = small
-                # Battle-screen background: fits between the two team columns and above the log box.
-                playfield_w = WIDTH - 2 * (BATTLE_COLUMN_PAD + BATTLE_COLUMN_W + ACTION_BTN_GAP + ACTION_BTN_W)
-                playfield_w = max(playfield_w, 600)
-                full_w = int(playfield_w * 0.95)
-                full_h = int((HEIGHT - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM - 60) * 0.95)
-                full = pygame.transform.smoothscale(img, (full_w, full_h))
-                full = self._apply_fade_mask(full, corner_radius=30, fade_width=50)
-                self.scenario_images_fullscreen[scenario["name"]] = full
-            except Exception:
-                pass
+            base = scenario["name"].lower().replace(" ", "_")
+            # Look for base.png, base2.png, base3.png, ... — stop at the first missing one.
+            small_variants = []
+            full_variants = []
+            suffix_i = 0
+            while True:
+                filename = f"{base}.png" if suffix_i == 0 else f"{base}{suffix_i + 1}.png"
+                path = os.path.join(scenarios_dir, filename)
+                if not os.path.isfile(path):
+                    break
+                try:
+                    img = pygame.image.load(path).convert_alpha()
+                    small = pygame.transform.smoothscale(img, (1100, 800))
+                    small = self._apply_fade_mask(small)
+                    small_variants.append(small)
+                    full = pygame.transform.smoothscale(img, (full_w, full_h))
+                    full = self._apply_fade_mask(full, corner_radius=30, fade_width=50)
+                    full_variants.append(full)
+                except Exception:
+                    break
+                suffix_i += 1
+            if small_variants:
+                self.scenario_images[scenario["name"]] = small_variants
+                self.scenario_images_fullscreen[scenario["name"]] = full_variants
 
     def _apply_fade_mask(self, img, corner_radius=120, fade_width=120):
         iw, ih = img.get_size()
@@ -360,7 +424,7 @@ class GameGUI:
         Unit.remove_all()
         self.battle = Battle()
         Unit.player_name = "Hero"
-        _class_map = {'K': Unit_Knight, 'P': Unit_Priest, 'TH': Unit_Thief, 'B': Unit_Berserker, 'A': Unit_Assassin}
+        _class_map = {'K': Unit_Knight, 'P': Unit_Priest, 'TH': Unit_Thief, 'B': Unit_Berserker, 'A': Unit_Assassin, 'T': Unit_Thug}
         _used_names = set()
 
         def pick_name(unit_cls):
@@ -402,8 +466,44 @@ class GameGUI:
         self.remove_slot_buttons = []
         self.add_slot_buttons = {}
 
-        self.start_button = Button((WIDTH - 300, HEIGHT - 130, 240, 50), "START BATTLE", self.start_battle, color=GREEN)
-        self.ai_toggle_button = Button((WIDTH - 300, HEIGHT - 190, 240, 50), f"Enemy AI: {'ON' if self.enemy_ai_enabled else 'OFF'}", self.toggle_enemy_ai, color=BLUE)
+        # Squarish START button — battle.png at the top, "START" label beneath, gold fill.
+        START_W, START_H = 160, 180
+        start_rect = (WIDTH - START_W - 60, HEIGHT - START_H - 60, START_W, START_H)
+        start_icon = None
+        try:
+            _raw = pygame.image.load(_resource_path(os.path.join("images", "battle.png"))).convert_alpha()
+            icon_size = 110
+            start_icon = pygame.transform.smoothscale(_raw, (icon_size, icon_size))
+        except Exception:
+            start_icon = None
+        GOLD        = (218, 165,  32)
+        GOLD_HOVER  = (240, 190,  55)
+        self.start_button = Button(
+            start_rect, "START", self.start_battle,
+            color=GOLD, hover_color=GOLD_HOVER,
+            icon=start_icon, image_stacked=True,
+            label_font=TITLE_FONT,
+        )
+        # Rectangular Enemy AI toggle sitting above the START button, with the spartan icon on the left.
+        # Colour indicates state: red when ON, grey when OFF.
+        AI_W, AI_H = 240, 64
+        start_x, start_y = start_rect[0], start_rect[1]
+        ai_rect = (start_x + (START_W - AI_W) // 2, start_y - AI_H - 16, AI_W, AI_H)
+        spartan_icon = None
+        try:
+            _raw_sp = pygame.image.load(_resource_path(os.path.join("images", "spartan.png"))).convert_alpha()
+            _sp_size = 44
+            spartan_icon = pygame.transform.smoothscale(_raw_sp, (_sp_size, _sp_size))
+        except Exception:
+            spartan_icon = None
+        ai_color = self._ai_toggle_colors(self.enemy_ai_enabled)
+        self.ai_toggle_button = Button(
+            ai_rect,
+            "Enemy AI",
+            self.toggle_enemy_ai,
+            color=ai_color[0], hover_color=ai_color[1],
+            icon=spartan_icon, icon_left=True,
+        )
 
         for i in range(len(self.player_team)):
             rect = (P_X, SLOT_Y + i * SLOT_SPACING, SLOT_W, SLOT_H)
@@ -443,14 +543,23 @@ class GameGUI:
             self.scenario_buttons.append(btn)
 
     def apply_scenario(self, scenario):
+        name = scenario["name"]
+        small_variants = self.scenario_images.get(name) or []
+        full_variants  = self.scenario_images_fullscreen.get(name) or []
+        n_variants = len(small_variants)
         if self.active_scenario is scenario:
+            # Repeat click on the active scenario: swap teams AND cycle to the next image variant.
             self.player_team, self.enemy_team = self.enemy_team, self.player_team
+            if n_variants > 1:
+                self.scenario_image_index[name] = (self.scenario_image_index.get(name, 0) + 1) % n_variants
         else:
             self.player_team = list(scenario["player"])
             self.enemy_team = list(scenario["enemy"])
             self.active_scenario = scenario
-        self.scenario_preview_image = self.scenario_images.get(scenario["name"])
-        self.scenario_preview_image_fullscreen = self.scenario_images_fullscreen.get(scenario["name"])
+            self.scenario_image_index[name] = 0
+        idx = self.scenario_image_index.get(name, 0)
+        self.scenario_preview_image             = small_variants[idx] if idx < n_variants else None
+        self.scenario_preview_image_fullscreen  = full_variants[idx]  if idx < n_variants else None
         self.setup_team_selection()
 
     def _add_slot(self, team_type):
@@ -724,9 +833,16 @@ class GameGUI:
             self.active_scenario = None
         return action
 
+    def _ai_toggle_colors(self, enabled):
+        """Returns (color, hover_color) for the AI toggle: red when ON, grey when OFF."""
+        if enabled:
+            return ((170, 50, 50), (205, 75, 75))
+        return ((90, 90, 90), (115, 115, 115))
+
     def toggle_enemy_ai(self):
         self.enemy_ai_enabled = not self.enemy_ai_enabled
-        self.ai_toggle_button.text = f"Enemy AI: {'ON' if self.enemy_ai_enabled else 'OFF'}"
+        colors = self._ai_toggle_colors(self.enemy_ai_enabled)
+        self.ai_toggle_button.color, self.ai_toggle_button.hover_color = colors
 
     def start_battle(self):
         self.setup_game()
@@ -761,6 +877,14 @@ class GameGUI:
             return "Players win!"
         return ""
 
+    def _get_incap_status(self, unit):
+        """Returns the name of an incapacitating status active on the unit
+        (STUN, SLEEP, ...) or None if the unit can act normally."""
+        for status in unit.effect_stacks_dict:
+            if status in self._incap_statuses:
+                return status
+        return None
+
     def next_turn(self):
         if self.battle.is_battle_over():
             self.game_over = True
@@ -792,6 +916,21 @@ class GameGUI:
         if self.current_unit.downed:
             self.battle.resolve_ghost_caster_turns(self.current_unit)
             Unit.process_downed(self.battle)
+            self.current_index += 1
+            self.next_turn()
+            return
+
+        # Incapacitating effect (Stun / Sleep) — skip the action but still
+        # tick every phase so the effect counts down and expires normally.
+        incap = self._get_incap_status(self.current_unit)
+        if incap:
+            self.log("{} is {}!".format(str(self.current_unit), incap.lower()))
+            self.battle.resolve_turn_start(self.current_unit)
+            self.battle.resolve_before_action(self.current_unit)
+            self.battle.resolve_after_action(self.current_unit)
+            self.battle.resolve_turn_end(self.current_unit)
+            Unit.process_downed(self.battle)
+            time.sleep(0.4)
             self.current_index += 1
             self.next_turn()
             return
@@ -1150,6 +1289,73 @@ class GameGUI:
                 self.unit_effect_area_rects[unit] = pygame.Rect(x + 10, effect_y_start, bar_w, effect_y + pill_h - effect_y_start)
         return rect
 
+    # Precompiled log-highlight regexes: (pattern, colour, priority).
+    # Higher priority wins on overlaps. Names get top priority so they
+    # always render gold even when embedded in a damage/heal phrase.
+    _LOG_PATTERNS = [
+        # Damage
+        (re.compile(r"\b\d+\s+(?:physical|magic)\s+damage\b", re.IGNORECASE), LOG_DMG_COLOR, 1),
+        (re.compile(r"\btook\s+\d+\s+damage\b", re.IGNORECASE),               LOG_DMG_COLOR, 1),
+        (re.compile(r"\brecoil damage\b", re.IGNORECASE),                     LOG_DMG_COLOR, 1),
+        (re.compile(r"\bfrom (?:a )?poison(?: dart)?\b", re.IGNORECASE),      LOG_DMG_COLOR, 1),
+        (re.compile(r"\bCritical hit\b"),                                     LOG_DMG_COLOR, 1),
+        (re.compile(r"\bis down\b"),                                          LOG_DMG_COLOR, 1),
+        # Heal
+        (re.compile(r"\bhealed\s+for\s+\d+\s+health\b", re.IGNORECASE),       LOG_HEAL_COLOR, 1),
+        (re.compile(r"\bwas fully healed\b", re.IGNORECASE),                  LOG_HEAL_COLOR, 1),
+        (re.compile(r"\brecovered\s+\d+\s+mana\b", re.IGNORECASE),            LOG_HEAL_COLOR, 1),
+        (re.compile(r"\bmana was fully restored\b", re.IGNORECASE),           LOG_HEAL_COLOR, 1),
+        # Buffs
+        (re.compile(r"\b(?:ATK|DEF|CRIT|DODGE|MAGIC|MP|HP)(?:[/ ][A-Za-z]+)*\s+(?:has\s+)?increased(?:\s+by\s+\d+)?"), LOG_BUFF_COLOR, 1),
+        (re.compile(r"\+\d+\s*(?:ATK|DEF|CRIT|DODGE|MP|HP)\b"),               LOG_BUFF_COLOR, 1),
+        # Debuffs
+        (re.compile(r"\b(?:ATK|DEF|CRIT|DODGE|MAGIC|MP|HP)(?:[/ ][A-Za-z]+)*\s+(?:has\s+)?decreased(?:\s+by\s+\d+)?"), LOG_DEBUFF_COLOR, 1),
+        (re.compile(r"-\d+\s*(?:ATK|DEF|CRIT|DODGE|MP|HP)\b"),                LOG_DEBUFF_COLOR, 1),
+        (re.compile(r"\bis stunned\b"),                                       LOG_DEBUFF_COLOR, 1),
+    ]
+    _LOG_CLASS_NAME_RE = re.compile(r"\b(?:Knight|Priest|Thief|Berserker|Assassin|Thug)\s*\|\s*[A-Za-z']+")
+
+    def _color_log_segments(self, line, unit_names):
+        """Splits a log line into (text, colour) segments for coloured rendering.
+        Names take priority over damage/heal/buff/debuff phrases."""
+        if not line:
+            return []
+        n = len(line)
+        colours = [LOG_TEXT] * n
+        priority = [0] * n
+
+        def paint(start, end, colour, prio):
+            for i in range(start, end):
+                if prio >= priority[i]:
+                    colours[i] = colour
+                    priority[i] = prio
+
+        # Domain patterns (prio 1)
+        for pattern, colour, prio in self._LOG_PATTERNS:
+            for m in pattern.finditer(line):
+                paint(m.start(), m.end(), colour, prio)
+        # Ability names (prio 2)
+        for pattern in self._ability_name_patterns:
+            for m in pattern.finditer(line):
+                paint(m.start(), m.end(), LOG_ABILITY_COLOR, 2)
+        # Unit names (prio 3 — highest, so a name that clashes with an ability still reads as a name)
+        for m in self._LOG_CLASS_NAME_RE.finditer(line):
+            paint(m.start(), m.end(), LOG_NAME_COLOR, 3)
+        for name in unit_names:
+            if not name:
+                continue
+            for m in re.finditer(r"\b" + re.escape(name) + r"\b", line):
+                paint(m.start(), m.end(), LOG_NAME_COLOR, 3)
+
+        segments = []
+        start = 0
+        for i in range(1, n):
+            if colours[i] != colours[start]:
+                segments.append((line[start:i], colours[start]))
+                start = i
+        segments.append((line[start:], colours[start]))
+        return segments
+
     def draw_info_panel(self):
         log_x = (WIDTH - LOG_BOX_W) // 2
         log_y = HEIGHT - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM
@@ -1168,10 +1374,25 @@ class GameGUI:
         max_lines = visible_height // line_height
         start_index = max(0, min(self.log_scroll, max(0, len(self.message_log) - max_lines)))
         visible_logs = self.message_log[start_index:start_index + max_lines]
+        # Snapshot unit names once per frame — used for gold-highlight of names
+        unit_names = set()
+        for team in (0, 1):
+            for u in Unit.get_units("all", team):
+                if u.name:
+                    unit_names.add(u.name)
         for i, line in enumerate(visible_logs):
-            text_surface = SMALL_FONT.render(line, True, LOG_TEXT)
-            clipped = text_surface.subsurface((0, 0, min(text_surface.get_width(), log_rect.width), text_surface.get_height()))
-            self.screen.blit(clipped, (log_rect.x, log_rect.y + i * line_height))
+            segments = self._color_log_segments(line, unit_names)
+            x_cursor = log_rect.x
+            row_right = log_rect.right
+            for text, colour in segments:
+                if x_cursor >= row_right:
+                    break
+                surf = SMALL_FONT.render(text, True, colour)
+                max_w = row_right - x_cursor
+                if surf.get_width() > max_w:
+                    surf = surf.subsurface((0, 0, max_w, surf.get_height()))
+                self.screen.blit(surf, (x_cursor, log_rect.y + i * line_height))
+                x_cursor += surf.get_width()
         if len(self.message_log) > max_lines:
             scroll_text = SMALL_FONT.render(f"{start_index + 1}-{min(start_index + max_lines, len(self.message_log))}/{len(self.message_log)}", True, LOG_TEXT)
             self.screen.blit(scroll_text, (log_x + LOG_BOX_W - scroll_text.get_width() - 8, log_y + 8))
@@ -1484,8 +1705,15 @@ class GameGUI:
         # anything left over.
         attributed = {}
         for evt in Ability._combat_events:
-            target = evt.get("target")
             kind = evt.get("kind")
+            # cast_sound is target-less — plays the ability's CAST_SOUND when a
+            # passive (e.g. Uproar on ally death) is triggered by Battle.
+            if kind == "cast_sound":
+                snd = self.sounds.get(evt.get("ability"))
+                if snd:
+                    snd.play()
+                continue
+            target = evt.get("target")
             if target is None:
                 continue
             if kind == "blocked":

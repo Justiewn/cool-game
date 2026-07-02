@@ -25,7 +25,7 @@ class Battle:
 
     def remove_effect(self, effect):
         if effect in self.active_effects:
-            print(f"Removing effect {effect.ABILITY_NAME} from battle")
+            # print(f"Removing effect {effect.ABILITY_NAME} from battle")  # debug
             self.active_effects.remove(effect)
         effect_status = effect.AttrValDict.get("EFFECT_STATUS")
         # If this effect applied stat modifiers that haven't been reversed yet
@@ -40,7 +40,7 @@ class Battle:
                 effect.effect_stat_modifier("remove", target)
         for target in effect.target_list:
             if effect in target.target_Ability_queue:
-                print(f"Removing effect {effect.ABILITY_NAME} from target {target.name}'s queue")
+                # print(f"Removing effect {effect.ABILITY_NAME} from target {target.name}'s queue")  # debug
                 target.target_Ability_queue.remove(effect)
             if effect_status:
                 target.modify_effect_stack_dict("remove", effect_status)
@@ -71,12 +71,33 @@ class Battle:
             if unit not in effect.target_list:
                 continue
             target_death = effect.AttrValDict.get("EFFECT_TARGET_DEATH", 0)
-            print(f"Handling downed unit {unit.name} for effect {effect.ABILITY_NAME}, target_death={target_death}")
+            # print(f"Handling downed unit {unit.name} for effect {effect.ABILITY_NAME}, target_death={target_death}")  # debug
             if target_death == 0:
                 self.remove_effect(effect)
             # target_death == 1: keep effect, expires on permanent death
         # Handle effects where this unit is the caster
         self.remove_caster_effects(unit)
+        # Fire passives that trigger on a teammate going down
+        self._fire_ally_death_passives(unit)
+
+    def _fire_ally_death_passives(self, fallen_unit):
+        """Casts each surviving teammate's ALLY_DEATH-triggered passives on
+        themselves (self-buffs like Uproar). Enemy passives are unaffected.
+        Emits a cast_sound combat event so the GUI can play CAST_SOUND without
+        this module needing to touch pygame."""
+        from Abilities import Ability
+        from Units import Unit
+        for ally in Unit.get_units("alive", fallen_unit.team):
+            if ally is fallen_unit:
+                continue
+            for passive_name in getattr(ally, 'passives', []):
+                attrs = Ability.AbilitiesDict.get(passive_name)
+                if not attrs or attrs.get("TRIGGER_ON") != "ALLY_DEATH":
+                    continue
+                if attrs.get("CAST_SOUND"):
+                    Ability._combat_events.append({"kind": "cast_sound", "ability": passive_name})
+                passive = Ability(passive_name, Ability.ability_ID_counter)
+                passive.initial_cast([ally], ally, self)
 
     def handle_unit_dead(self, unit):
         """Called on permanent death. Removes all remaining effects on or cast by the unit."""

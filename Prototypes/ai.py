@@ -124,23 +124,52 @@ def _strategy_priest(caster):
 
 def _strategy_knight(caster):
     enemies = _enemies(caster)
-    # 1. Sharpen sword if the buff isn't up — big damage window opener
+    allies = _allies(caster)
+    has_slash = _has_move(caster, "Sword slash") and _can_afford(caster, "Sword slash")
+
+    # 1. Sword slash for a guaranteed kill (max roll can KO). Never miss a KO.
+    if enemies and has_slash:
+        base = Ability.get_attr("Sword slash", "DMG_BASE") or 0
+        roll = Ability.get_attr("Sword slash", "DMG_ROLL") or 0
+        killable = None
+        for e in sorted(enemies, key=lambda x: x.hp):
+            if caster.ATK + base + roll - e.DEF >= e.hp:
+                killable = e
+                break
+        if killable:
+            return "Sword slash", [killable]
+
+    # 2. Desperate at <10 HP — skip setup/defensive plays, just swing
+    if caster.hp < 10:
+        if enemies and has_slash:
+            return "Sword slash", [_damage_target(caster, "Sword slash", enemies)]
+        return None, None
+
+    # 3. Sharpen sword if the buff isn't already active — damage window opener
     if (_has_move(caster, "Sharpen sword") and _can_afford(caster, "Sharpen sword")
             and not _has_effect(caster, "SHRPN")):
         return "Sharpen sword", [caster]
-    # 2. Shield up when hurt and no shield active
-    if (_hp_ratio(caster) < 0.55 and _has_move(caster, "Raise shield")
-            and _can_afford(caster, "Raise shield") and not _has_effect(caster, "SHLD")):
-        return "Raise shield", [caster]
-    # 3. Attack
-    if enemies and _has_move(caster, "Sword slash") and _can_afford(caster, "Sword slash"):
+
+    # 4. Shield up only if THIS Knight is the softest ally and below 40 HP
+    if (allies and _has_move(caster, "Raise shield") and _can_afford(caster, "Raise shield")
+            and not _has_effect(caster, "SHLD") and caster.hp < 40):
+        if _lowest_hp(allies) is caster:
+            return "Raise shield", [caster]
+
+    # 5. Default: slash the softest / kill-shot target
+    if enemies and has_slash:
         return "Sword slash", [_damage_target(caster, "Sword slash", enemies)]
     return None, None
 
 
 def _strategy_berserker(caster):
     enemies = _enemies(caster)
-    # 1. Frenzy self-buff first — huge ATK/CRIT
+    # 1. Desperate at <10 HP — skip setup, just Cleave
+    if caster.hp < 10:
+        if enemies and _has_move(caster, "Cleave") and _can_afford(caster, "Cleave"):
+            return "Cleave", enemies
+        return None, None
+    # 2. Frenzy self-buff first — huge ATK/CRIT
     if (_has_move(caster, "Frenzy") and _can_afford(caster, "Frenzy")
             and not _has_effect(caster, "FRENZY")):
         return "Frenzy", [caster]
@@ -159,29 +188,54 @@ def _strategy_berserker(caster):
 
 
 def _strategy_assassin(caster):
+    """Optimal cycle: Mark → Poison → Poison per enemy (setting up all of them),
+    then Stab anyone the ticks have pushed under 50% HP. Shroud is a stall when
+    HP/MP get low so the poison ticks finish the job."""
     enemies = _enemies(caster)
-    marked = [e for e in enemies if _has_effect(e, "MARKED")]
-    # 1. Regen MP + dodge with Shroud when low on mana and unshrouded
-    if (caster.mp < caster.max_mp * 0.4 and _has_move(caster, "Shroud")
+    if not enemies:
+        return None, None
+
+    max_psn = Ability.get_attr("Poison", "EFFECT_STACKS") or 2
+    hp_low = _hp_ratio(caster) < 0.4
+    mp_low = caster.mp < caster.max_mp * 0.4
+
+    # 1. Emergency Shroud — stall while poison ticks finish, refill MP, gain dodge
+    if ((hp_low or mp_low) and _has_move(caster, "Shroud")
             and _can_afford(caster, "Shroud") and not _has_effect(caster, "SHROUD")):
         return "Shroud", [caster]
-    # 2. Finish marked targets with Stab/Backstab (bonus damage)
-    if marked and _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
-        return "Stab/Backstab", [_lowest_hp(marked)]
-    # 3. Mark the biggest threat if unmarked
-    if enemies and _has_move(caster, "Mark") and _can_afford(caster, "Mark"):
-        unmarked = [e for e in enemies if not _has_effect(e, "MARKED")]
-        if unmarked:
-            return "Mark", [_highest_threat(unmarked)]
-    # 4. Poison a soft target that isn't already at cap
-    if enemies and _has_move(caster, "Poison") and _can_afford(caster, "Poison"):
-        max_psn = Ability.get_attr("Poison", "EFFECT_STACKS") or 2
-        soft = [e for e in enemies if _stacks(e, "PSN") < max_psn]
-        if soft:
-            return "Poison", [min(soft, key=lambda e: e.DEF)]
-    # 5. Otherwise Stab whoever's weakest
-    if enemies and _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
-        return "Stab/Backstab", [_lowest_hp(enemies)]
+
+    # 2. Finisher — anyone below 50% HP gets Stabbed. Prefer Marked targets
+    #    (bonus damage from Stab/Backstab against MARKED).
+    weakened = [e for e in enemies if _hp_ratio(e) < 0.5]
+    if weakened and _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
+        marked_weak = [e for e in weakened if _has_effect(e, "MARKED")]
+        target = _lowest_hp(marked_weak or weakened)
+        return "Stab/Backstab", [target]
+
+    # 3. Setup cycle. Process enemies in threat order — highest threat first —
+    #    and for each, apply Mark then Poison-to-cap before moving to the next.
+    for e in sorted(enemies, key=_threat_score, reverse=True):
+        if not _has_effect(e, "MARKED"):
+            if _has_move(caster, "Mark") and _can_afford(caster, "Mark"):
+                return "Mark", [e]
+            break  # can't afford Mark on the current target — bail to stall/fallback
+        if _stacks(e, "PSN") < max_psn:
+            if _has_move(caster, "Poison") and _can_afford(caster, "Poison"):
+                return "Poison", [e]
+            break
+
+    # 4. Everyone's fully set up — stall with Shroud (regen MP, gain dodge)
+    #    while the poison ticks bring them under 50%.
+    if (_has_move(caster, "Shroud") and _can_afford(caster, "Shroud")
+            and not _has_effect(caster, "SHROUD")):
+        return "Shroud", [caster]
+
+    # 5. Last resort — Stab whoever's weakest, preferring Marked
+    if _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
+        marked = [e for e in enemies if _has_effect(e, "MARKED")]
+        target = _lowest_hp(marked or enemies)
+        return "Stab/Backstab", [target]
+
     return None, None
 
 
@@ -208,19 +262,28 @@ def _strategy_thief(caster):
 def _strategy_thug(caster):
     allies = _allies(caster)
     enemies = _enemies(caster)
-    # 1. Uproar if any ally isn't at cap
-    if allies and _has_move(caster, "Uproar") and _can_afford(caster, "Uproar"):
-        cap = Ability.get_attr("Uproar", "EFFECT_STACKS") or 5
-        min_stacks = min(_stacks(a, "UPROAR") for a in allies)
+    # 1. Desperate at <10 HP — skip Riot/Rest/Tackle, throw Punches (no recoil)
+    if caster.hp < 10:
+        if enemies and _has_move(caster, "Punch") and _can_afford(caster, "Punch"):
+            return "Punch", [_damage_target(caster, "Punch", enemies)]
+        return None, None
+    # 2. Riot if any ally isn't at cap (team ATK/CRIT buff)
+    if allies and _has_move(caster, "Riot") and _can_afford(caster, "Riot"):
+        cap = Ability.get_attr("Riot", "EFFECT_STACKS") or 5
+        min_stacks = min(_stacks(a, "RIOT") for a in allies)
         if min_stacks < cap:
-            targets = _valid_targets(caster, "Uproar")
+            targets = _valid_targets(caster, "Riot")
             if targets:
-                return "Uproar", targets
-    # 2. Self-heal when hurt
-    if (_hp_ratio(caster) < 0.45 and _has_move(caster, "Bandage")
-            and _can_afford(caster, "Bandage")):
-        return "Bandage", [caster]
-    # 3. Punch weakest
+                return "Riot", targets
+    # 2. Rest when hurt (Tackle costs HP; recover first)
+    if _hp_ratio(caster) < 0.4:
+        return "Rest", [caster]
+    # 3. Tackle: primary attack — higher damage + 25% stun, at HP cost
+    if enemies and _has_move(caster, "Tackle") and _can_afford(caster, "Tackle"):
+        target = _damage_target(caster, "Tackle", enemies)
+        if target:
+            return "Tackle", [target]
+    # 4. Fallback punch
     if enemies and _has_move(caster, "Punch") and _can_afford(caster, "Punch"):
         return "Punch", [_damage_target(caster, "Punch", enemies)]
     return None, None

@@ -125,6 +125,7 @@ class Ability():
     def initial_cast(self, target_list, caster, battle):
         self.target_list = target_list                            #store target_list and caster in ability instance
         self.caster = caster
+        self.battle = battle                                      #for sub-effect application by special methods
         self.last_damage_dealt = 0
         if self.AttrValDict["TARGET_TYPE"] == 1:
             print("{} used {} on {}!".format(caster.name, self.ABILITY_NAME, str(self.target_list[0])))
@@ -187,7 +188,7 @@ class Ability():
         if not self.ability_dodged(target):                                 #if abiltiy hits (i.e. ability_dodged = False)
             if self.AttrValDict["IS_SPECIAL"]:              #put it first in order because ..
                 success = self.special_sorter(target, caster)
-                print( "success? " + str(success) )
+                # print( "success? " + str(success) )  # debug
                 # Stack removal on expiry is handled centrally in Battle.remove_effect;
                 # doing it here as well caused the pill count to drop by 2 per expiry.
                 if success == False:                                                                  #elif move was unsuccessful
@@ -252,7 +253,7 @@ class Ability():
         method = getattr(self, method_name, None)
         if method is not None:
             return method(target, caster)
-        print("special_sorter: no method found for '{}'".format(self.ABILITY_NAME))
+        # print("special_sorter: no method found for '{}'".format(self.ABILITY_NAME))  # debug / misconfig warning
 
     #uses EFFECT_VALUES in AttrValDict to find which unit stats to change. Usually called twice: at initial cast, and revert at expiration
     def effect_stat_modifier(self, add_remove, target):
@@ -363,11 +364,12 @@ class Ability():
             print("{} regains his composure. His DEF returns to normal".format(str(target)))
 
     #
-    def Uproar(self, target, caster=None):                                                                                  
-        if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, 
+    def Riot(self, target, caster=None):
+        # Active team buff: ATK+2 CRIT+3 for several turns, stacks up to 5.
+        if self.turns_left == self.AttrValDict["TICKS"]:
             self.effect_stat_modifier("add", target)
-            print("{}'s ATK increased by 2 and CRIT has increased by 5!".format(str(target)))
-        elif self.turns_left == 0:                                                           #reverse effects in last turn
+            print("{}'s ATK increased by 2 and CRIT increased by 3!".format(str(target)))
+        elif self.turns_left == 0:
             self.effect_stat_modifier("remove", target)
             print("{} regains his composure. His ATK and CRIT return to normal.".format(str(target)))
     #
@@ -414,6 +416,49 @@ class Ability():
         elif self.turns_left == 0:                                                        #reverse effect on expiry
             self.effect_stat_modifier("remove", target)
             print("{} is no longer Marked. Their DEF returns to normal.".format(str(target)))
+
+    #
+    def Tackle(self, target, caster):
+        # Damages target normally, hits caster for a fixed recoil,
+        # and rolls 25% to apply a 1-turn Stun on the target.
+        raw_damage = self.calculate_dmg(caster, "NORMAL")
+        final_damage = self.calculate_def(raw_damage, target, "NORMAL")
+        is_crit = random.random() < caster.CRIT / 100
+        if is_crit and final_damage > 0:
+            final_damage = math.ceil(final_damage * 1.5)
+        Ability.damage_target(final_damage, target, "NORMAL", is_crit)
+        self.last_damage_dealt = getattr(self, 'last_damage_dealt', 0) + max(0, final_damage)
+
+        # Recoil to caster — 12% of max HP, minimum 3
+        recoil = max(3, math.floor(caster.max_hp * 0.12))
+        caster.hp -= recoil
+        print("{} takes {} recoil damage from the tackle!".format(str(caster), recoil))
+
+        # Stun chance — only meaningful if target still standing
+        if target.hp > 0 and random.random() < 0.20:
+            battle = getattr(self, 'battle', None)
+            if battle is not None:
+                stun = Ability("Stun", Ability.ability_ID_counter)
+                stun.caster = caster
+                stun.target_list = [target]
+                stun.turns_left = stun.AttrValDict["TICKS"]
+                battle.enforce_stack_limit(stun, target)
+                target.modify_effect_stack_dict("add", stun.AttrValDict["EFFECT_STATUS"])
+                battle.register_effect(stun)
+                print("{} is stunned!".format(str(target)))
+
+        # Return True so cast_on_target's post-special damage branch is skipped
+        # (Tackle already applied damage above). Same pattern as StabBackstab.
+        return True
+
+    def Uproar(self, target, caster=None):
+        # Passive triggered by Battle when a teammate goes down: ATK+5 CRIT+8.
+        if self.turns_left == self.AttrValDict["TICKS"]:
+            self.effect_stat_modifier("add", target)
+            print("{} roars into an uproar! ATK +5 / CRIT +8".format(str(target)))
+        elif self.turns_left == 0:
+            self.effect_stat_modifier("remove", target)
+            print("{}'s rage subsides".format(str(target)))
 
     #
     def StabBackstab(self, target, caster):
