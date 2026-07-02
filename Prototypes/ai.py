@@ -301,6 +301,23 @@ _STRATEGIES = {
 }
 
 
+def choose_next_unit(units, battle):
+    """Picks which of `units` (all on the same AI-controlled team, awaiting
+    their turn) should act next. Heuristic: prefer high-threat units so
+    buffs land before the finishers, but demote units that are stunned or
+    asleep (they'd skip anyway)."""
+    if not units:
+        return None
+    incap_statuses = {"STUN", "SLEEP"}
+    def score(u):
+        s = _threat_score(u)
+        # Demote incapacitated units — let them tick off before doing anything meaningful
+        if any(st in incap_statuses for st in u.effect_stacks_dict):
+            s -= 10_000
+        return s
+    return max(units, key=score)
+
+
 def choose_action(battle, unit):
     """Returns (ability_name, targets) for this AI-controlled unit's turn.
     Always returns a legal move if any exist; falls back to Rest otherwise."""

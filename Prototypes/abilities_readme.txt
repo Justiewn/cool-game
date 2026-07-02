@@ -59,14 +59,24 @@ When the effect loses a tick
 5 = when the target is attacked
 6 = when the target is attacked OR attacks
 
-EFFECT_TICK_OWNER (int) 
-0 = effect ticks on the target's turn
-1 = effect ticks on the caster's turn
+EFFECT_TICK_OWNER (int)
+0 = effect ticks on the target's TEAM turn
+1 = effect ticks on the caster's TEAM turn
 Only applies when EFFECT_TICKS_ON = 0
+Turn order within a team is chosen freely by the player/AI, so we say
+"team turn" rather than "unit turn". A tick still only fires for effects
+where the relevant unit (target or caster) is on the team whose turn is
+starting/ending.
 
 EFFECT_TICK_PHASE (int)
-0 = tick fires at the start of the relevant turn, 
-1 = tick fires at the end of the relevant turn
+0 = tick fires ONCE at the start of the relevant team's turn (before any
+    unit on that team is picked to act). All PHASE=0 ticks for that team
+    resolve in one batch — poison damage, buff-duration decrements, etc.
+    Incapacitating effects (PREVENTS_ACTION=true, e.g. Stun) are the
+    exception: they tick per-unit when the incapacitated unit is picked,
+    so their "skip one turn" semantics stay intact.
+1 = tick fires at the end of the relevant unit's action (after their cast
+    resolves), same as before.
 
 EFFECT_TICK_ON_HIT_ONLY (bool)
 Only applies when EFFECT_TICKS_ON >= 1
@@ -96,6 +106,20 @@ the text displayed in the tooltip on hover over effect pill
 EFFECT_VALUES (str array)
 {"max_hp": 0, "max_mp": 0, "ATK": 0, "DEF": 0, "CRIT": 0, "DODGE": 0}
 Can have any or null
+
+PREVENTS_ACTION (bool, optional; default false)
+If true, the target cannot take an action while any stack of this
+effect is on them. When a picked unit has an active PREVENTS_ACTION
+status, they auto-skip with a "X is stunned/asleep!" log line and
+their per-unit tick cycle fires (all four resolve phases) so the
+effect duration counts down normally. Used by Stun and Sleep.
+
+TRIGGER_ON (str, optional)
+Marks the ability as a passive that Battle fires automatically when
+an event occurs, instead of being chosen from movesList.
+"ALLY_DEATH" = fires on every surviving teammate when a teammate is
+              downed. Currently used by Thug's Uproar passive.
+Passives declared on a unit via Unit.passives = ["<name>", ...].
 
 TOOLTIP_INFO
 Text to appear as the first line in the ability tooltip

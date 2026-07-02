@@ -223,6 +223,9 @@ class GameGUI:
         self.hp_splashes = []      # list of dicts: unit, amount, color, spawn_t, y_off
         self.shake_state = {}      # id(unit) -> {spawn_t, duration}
         self.nudge_state = {}      # id(unit) -> {spawn_t, duration}
+        # Per-unit persistent "awaiting-turn" offset — smoothly eases in when a
+        # unit becomes selectable and eases out once they've acted.
+        self.awaiting_nudge_pos = {}
         # Per-unit ordered list of pill anim entries: {"status", "stacks", "phase", "start_t"}.
         # phase in {"in", "steady", "out"}; "out" pills stay in the list until fade completes.
         self.pill_states = {}
@@ -240,7 +243,10 @@ class GameGUI:
         self.action_locked = False
         self._pending_hit_sound = None
         self.current_team = 0
-        self.current_index = 0
+        # Units on each team that still need to act this round. Player picks order
+        # freely from this list; empty means the team's round is done.
+        self.units_awaiting_turn = {0: [], 1: []}
+        self.picking_unit = False   # True while waiting for a human to click / hotkey a unit
         self.info_text = "Select your team and enemy team to begin."
         self.state = 'team_select'
         self.player_team = ['K', 'P', 'TH']
@@ -363,6 +369,10 @@ class GameGUI:
         return result
 
     def load_unit_portraits(self):
+        """Loads portrait PNGs and stores TWO sizes: a 44px avatar for battle
+        unit cards (self.unit_portraits) and a 256px hi-res copy for the
+        selection screen (self.unit_portraits_hires). draw_class_icon downscales
+        from the hi-res copy so the icons stay crisp at any size."""
         portraits_dir = _resource_path(os.path.join("images", "portraits"))
         mapping = {
             "Thug": "thug.png",
@@ -373,14 +383,23 @@ class GameGUI:
             "Assassin": "assassin.png",
         }
         portraits = {}
+        self.unit_portraits_hires = {}
         fallback = self.create_fallback_portrait()
         for class_name, file_name in mapping.items():
             portrait_path = os.path.join(portraits_dir, file_name)
             try:
                 image = pygame.image.load(portrait_path).convert_alpha()
-                portraits[class_name] = pygame.transform.scale(image, (44, 44))
+                portraits[class_name] = pygame.transform.smoothscale(image, (44, 44))
+                # Hi-res copy: use the original if it's already big enough,
+                # otherwise smoothscale up to 256 to standardise.
+                iw, ih = image.get_size()
+                if max(iw, ih) >= 256:
+                    self.unit_portraits_hires[class_name] = image
+                else:
+                    self.unit_portraits_hires[class_name] = pygame.transform.smoothscale(image, (256, 256))
             except Exception:
                 portraits[class_name] = fallback
+                self.unit_portraits_hires[class_name] = fallback
         return portraits
 
     def play_bgm(self, folder):
@@ -459,6 +478,7 @@ class GameGUI:
         self.hp_splashes.clear()
         self.shake_state.clear()
         self.nudge_state.clear()
+        self.awaiting_nudge_pos.clear()
         self.pill_states.clear()
         Ability._combat_events.clear()
         self._last_frame_t = time.time()
@@ -859,11 +879,22 @@ class GameGUI:
         self._setup_pause_buttons()
         self.play_bgm('battle')
         self.current_team = 0
-        self.current_index = 0
         self.current_unit = None
+        self.picking_unit = False
+        # Player team starts; populate its awaiting list. Stunned/asleep units
+        # don't get picked — their ticks fire in the team-turn-end batch.
+        self.units_awaiting_turn = {
+            0: [u for u in Unit.get_units("all", 0)
+                if u.alive and not u.dead and not self._get_incap_status(u)],
+            1: [],
+        }
         self.game_over = False
         self.message_log.clear()
         self.log("Battle begins!")
+        # Fire opening team-turn-start ticks for team 0
+        self._fire_team_turn_start_ticks(0)
+        if self.game_over:
+            return
         self.next_turn()
 
     def log(self, message):
@@ -893,73 +924,135 @@ class GameGUI:
         return None
 
     def next_turn(self):
+        """Advance play: if the current team still has units awaiting their turn,
+        either let the human pick one (via click / hotkey) or let the AI pick.
+        Empty awaiting list means the team's round is over — fire ghost-caster
+        ticks for that team's downed units, switch teams, and refill."""
         if self.battle.is_battle_over():
             self.game_over = True
             self.info_text = self.get_winner_text()
             return
 
-        active_team = [u for u in Unit.get_units("all", self.current_team) if not u.dead]
-        if not active_team:
-            self.current_team = 1 - self.current_team
-            self.current_index = 0
-            active_team = [u for u in Unit.get_units("all", self.current_team) if not u.dead]
+        # Drop anyone from awaiting who died or became incapacitated
+        # (stunned/asleep) since being queued. Stunned units don't require a
+        # pick — their ticks fire in the team-turn-end batch.
+        awaiting = [u for u in self.units_awaiting_turn.get(self.current_team, [])
+                    if u.alive and not u.dead and not self._get_incap_status(u)]
+        self.units_awaiting_turn[self.current_team] = awaiting
 
-        if not active_team:
-            self.game_over = True
-            self.info_text = self.get_winner_text()
-            return
-
-        if self.current_index >= len(active_team):
-            self.current_team = 1 - self.current_team
-            self.current_index = 0
-            active_team = [u for u in Unit.get_units("all", self.current_team) if not u.dead]
-            if not active_team:
+        if not awaiting:
+            # End of current team's round.
+            # 1. Fire the full four-phase tick cycle for units that were
+            #    incapacitated — this consumes their stun/sleep duration and
+            #    resolves any other effects on them.
+            for unit in Unit.get_units("all", self.current_team):
+                if unit.dead or not unit.alive:
+                    continue
+                incap = self._get_incap_status(unit)
+                if incap:
+                    self.log("{} is {}!".format(str(unit), incap.lower()))
+                    self.battle.resolve_turn_start(unit)
+                    self.battle.resolve_before_action(unit)
+                    self.battle.resolve_after_action(unit)
+                    self.battle.resolve_turn_end(unit)
+            # 2. Ghost-caster ticks for downed units on this team.
+            for unit in Unit.get_units("all", self.current_team):
+                if unit.downed:
+                    self.battle.resolve_ghost_caster_turns(unit)
+            Unit.process_downed(self.battle)
+            if self.battle.is_battle_over():
                 self.game_over = True
                 self.info_text = self.get_winner_text()
                 return
-
-        self.current_unit = active_team[self.current_index]
-
-        if self.current_unit.downed:
-            self.battle.resolve_ghost_caster_turns(self.current_unit)
-            Unit.process_downed(self.battle)
-            self.current_index += 1
+            # 3. Switch to the other team and populate its awaiting list —
+            #    stunned units on the incoming team are excluded, they'll get
+            #    the same team-turn-end batching when their turn ends.
+            self.current_team = 1 - self.current_team
+            self.units_awaiting_turn[self.current_team] = [
+                u for u in Unit.get_units("all", self.current_team)
+                if u.alive and not u.dead and not self._get_incap_status(u)
+            ]
+            # Fire PHASE=0 ticks for the new team (already skips stunned units)
+            self._fire_team_turn_start_ticks(self.current_team)
+            if self.game_over:
+                return
             self.next_turn()
             return
 
+        is_human_team = (self.current_team == 0) or (not self.enemy_ai_enabled)
+        if is_human_team:
+            # Wait for a click / hotkey to pick a unit
+            self.picking_unit = True
+            self.current_unit = None
+            self.selected_ability = None
+            self.available_targets = None
+            self.action_buttons = []
+            side = "Your" if self.current_team == 0 else "Enemy"
+            self.info_text = f"{side} turn — pick a unit ({len(awaiting)} left)."
+            self.action_locked = False
+        else:
+            # AI-controlled team: let AI pick which unit acts first
+            from ai import choose_next_unit
+            picked = choose_next_unit(awaiting, self.battle)
+            if picked is None:
+                picked = awaiting[0]
+            self._begin_unit_turn(picked)
+
+    def _begin_unit_turn(self, unit):
+        """Called once a unit has been chosen (by click, hotkey, or AI).
+        Does NOT fire resolve_turn_start / resolve_before_action — those are
+        deferred until the player commits to an ability inside cast_selected_ability,
+        so switching to another unit before committing is free of side-effects.
+        Stunned/asleep units auto-skip and DO fire ticks (they're committed on pick)."""
+        self.picking_unit = False
+        self.current_unit = unit
         # Incapacitating effect (Stun / Sleep) — skip the action but still
         # tick every phase so the effect counts down and expires normally.
-        incap = self._get_incap_status(self.current_unit)
+        incap = self._get_incap_status(unit)
         if incap:
-            self.log("{} is {}!".format(str(self.current_unit), incap.lower()))
-            self.battle.resolve_turn_start(self.current_unit)
-            self.battle.resolve_before_action(self.current_unit)
-            self.battle.resolve_after_action(self.current_unit)
-            self.battle.resolve_turn_end(self.current_unit)
+            self.log("{} is {}!".format(str(unit), incap.lower()))
+            self.battle.resolve_turn_start(unit)
+            self.battle.resolve_before_action(unit)
+            self.battle.resolve_after_action(unit)
+            self.battle.resolve_turn_end(unit)
             Unit.process_downed(self.battle)
             time.sleep(0.4)
-            self.current_index += 1
+            self._complete_current_unit_turn()
             self.next_turn()
             return
 
         self.current_unit_target_team = 1 - self.current_team
-        self.battle.resolve_turn_start(self.current_unit)
-        self.battle.resolve_before_action(self.current_unit)
-        Unit.process_downed(self.battle)
-        if self.battle.is_battle_over():
-            self.game_over = True
-            self.info_text = self.get_winner_text()
-            return
-        if self.current_unit not in Unit.get_units("alive", self.current_team):
-            self.next_turn()
-            return
-        self.info_text = f"{self.current_unit} is choosing a move."
+        self.info_text = f"{unit} is choosing a move."
         self.selected_ability = None
         self.available_targets = None
         self.build_action_buttons()
         self.action_locked = False
-        if self.current_unit.team == 1 and self.enemy_ai_enabled:
+        if unit.team == 1 and self.enemy_ai_enabled:
             self.execute_enemy_ai()
+
+    def _complete_current_unit_turn(self):
+        """Removes the current unit from its team's awaiting-turn list."""
+        team = self.current_team
+        try:
+            self.units_awaiting_turn[team].remove(self.current_unit)
+        except (ValueError, KeyError):
+            pass
+
+    def _fire_team_turn_start_ticks(self, team_id):
+        """Fires PHASE=0 ticks (turn_start, before_action) once for every alive
+        unit on the given team — the team-turn analogue of the old per-unit
+        turn-start firing. Skips units that are incapacitated so effects like
+        Stun retain their 'skip one turn' semantics via the incap-skip path in
+        _begin_unit_turn."""
+        for unit in Unit.get_units("alive", team_id):
+            if self._get_incap_status(unit):
+                continue
+            self.battle.resolve_turn_start(unit)
+            self.battle.resolve_before_action(unit)
+        Unit.process_downed(self.battle)
+        if self.battle.is_battle_over():
+            self.game_over = True
+            self.info_text = self.get_winner_text()
 
     def build_action_buttons(self):
         self.action_buttons.clear()
@@ -1039,6 +1132,8 @@ class GameGUI:
             return
         self.action_locked = True
         self._pending_hit_sound = None
+        # PHASE=0 ticks (turn_start, before_action) fire once per team turn now,
+        # so nothing to tick here — just play the cast and resolve PHASE=1 after.
         cast_snd = self.sounds.get(self.selected_ability.ABILITY_NAME)
         if cast_snd:
             cast_snd.play()
@@ -1127,6 +1222,38 @@ class GameGUI:
         direction = 1 if unit.team == 0 else -1
         return int(8 * amount * direction)
 
+    AWAITING_NUDGE_PX = 10       # how far a selectable unit's card slides toward centre
+    AWAITING_NUDGE_RATE = 60.0   # px/sec — smooth ease-in / ease-out
+
+    def _update_awaiting_nudges(self, dt):
+        """Eases each unit's persistent awaiting-turn offset toward its target:
+        AWAITING_NUDGE_PX (signed by team) if the unit is currently pickable
+        (still in awaiting — includes the currently-picked one), 0 otherwise.
+        Runs once per frame from _update_hp_animations."""
+        step = self.AWAITING_NUDGE_RATE * dt
+        current_awaiting = set(id(u) for u in self.units_awaiting_turn.get(self.current_team, []))
+        # Consider both teams so units on the previous team ease back to 0
+        for team in (0, 1):
+            for unit in Unit.get_units("all", team):
+                if unit.dead:
+                    self.awaiting_nudge_pos.pop(id(unit), None)
+                    continue
+                uid = id(unit)
+                cur = self.awaiting_nudge_pos.get(uid, 0.0)
+                if uid in current_awaiting:
+                    direction = 1 if unit.team == 0 else -1
+                    target = self.AWAITING_NUDGE_PX * direction
+                else:
+                    target = 0.0
+                if abs(target - cur) <= step:
+                    cur = target
+                else:
+                    cur += step if target > cur else -step
+                self.awaiting_nudge_pos[uid] = cur
+
+    def _get_awaiting_offset(self, unit):
+        return int(round(self.awaiting_nudge_pos.get(id(unit), 0.0)))
+
     def _column_top_y(self, team_units_visible, v_spacing, card_h):
         """Vertical origin for a team's card column — centred in the playable band."""
         top_edge = BATTLE_COLUMN_PAD
@@ -1155,7 +1282,8 @@ class GameGUI:
         for index, unit in enumerate(player_units):
             shake_dx, shake_dy = self._get_shake_offset(unit)
             nudge_dx = self._get_nudge_offset(unit)
-            card_x = PLAYER_CARD_X + shake_dx + nudge_dx
+            awaiting_dx = self._get_awaiting_offset(unit)
+            card_x = PLAYER_CARD_X + shake_dx + nudge_dx + awaiting_dx
             card_y = player_top + index * v_spacing + shake_dy
             rect = pygame.Rect(card_x, card_y, card_w, card_h)
             fill = self.get_unit_card_fill(unit, rect, mouse_pos, hovered_ability_targets, available_hover_targets)
@@ -1167,7 +1295,8 @@ class GameGUI:
         for index, unit in enumerate(enemy_units):
             shake_dx, shake_dy = self._get_shake_offset(unit)
             nudge_dx = self._get_nudge_offset(unit)
-            card_x = ENEMY_CARD_X + shake_dx + nudge_dx
+            awaiting_dx = self._get_awaiting_offset(unit)
+            card_x = ENEMY_CARD_X + shake_dx + nudge_dx + awaiting_dx
             card_y = enemy_top + index * v_spacing + shake_dy
             rect = pygame.Rect(card_x, card_y, card_w, card_h)
             fill = self.get_unit_card_fill(unit, rect, mouse_pos, hovered_ability_targets, available_hover_targets)
@@ -1179,6 +1308,17 @@ class GameGUI:
 
     def draw_unit_card(self, unit, x, y, color, fill=None, hovered_ability_targets=None, card_h=160, card_w=300):
         rect = pygame.Rect(x, y, card_w, card_h)
+        # Blue "can still move" glow around every unit still in awaiting.
+        # Drawn before the card fill so the card sits crisply on top of the glow ring.
+        if unit in self.units_awaiting_turn.get(self.current_team, []):
+            pulse = (math.sin(time.time() * 3.0) + 1) * 0.5   # 0..1 at ~1.5 Hz
+            glow_pad = 6 + int(pulse * 4)                     # 6..10 px halo
+            glow_alpha = int(90 + pulse * 60)                 # 90..150
+            glow_rect = rect.inflate(glow_pad * 2, glow_pad * 2)
+            glow_surf = pygame.Surface(glow_rect.size, pygame.SRCALPHA)
+            pygame.draw.rect(glow_surf, (70, 150, 240, glow_alpha),
+                             glow_surf.get_rect(), border_radius=14)
+            self.screen.blit(glow_surf, glow_rect.topleft)
         fill_color = fill if fill is not None else LIGHT_GRAY
         pygame.draw.rect(self.screen, fill_color, rect, border_radius=10)
         border_color = BLACK
@@ -1190,6 +1330,8 @@ class GameGUI:
             border_color = (255, 215, 0)
         elif self.available_targets and unit in self.available_targets:
             border_color = (255, 215, 0)
+        elif self.picking_unit and unit in self.units_awaiting_turn.get(self.current_team, []):
+            border_color = GREEN
         if self.ai_targeted_units and unit in self.ai_targeted_units:
             border_color = RED
         pygame.draw.rect(self.screen, border_color, rect, 2, border_radius=10)
@@ -1664,7 +1806,8 @@ class GameGUI:
         pygame.draw.rect(self.screen, BLACK, frame, 2, border_radius=8)
 
         class_name = self.CLASS_NAMES.get(class_key, "Thug")
-        portrait = self.unit_portraits.get(class_name, self.create_fallback_portrait())
+        # Pull from the hi-res copy so downscaling stays sharp at any icon size.
+        portrait = self.unit_portraits_hires.get(class_name) or self.unit_portraits.get(class_name) or self.create_fallback_portrait()
         icon_surface = pygame.transform.smoothscale(portrait, (size - 8, size - 8))
         self.screen.blit(icon_surface, (x + 4, y + 4))
 
@@ -1705,6 +1848,7 @@ class GameGUI:
         now = time.time()
         dt = min(0.1, now - self._last_frame_t)  # clamp to avoid huge catch-up jumps
         self._last_frame_t = now
+        self._update_awaiting_nudges(dt)
         # Drain queued combat events — non-damage messages (Blocked / Dodged) and
         # source-attributed damage (Poison ticks) that need their own splash colour.
         # attributed[id(unit)] is the total HP delta already accounted for by events,
@@ -1882,21 +2026,26 @@ class GameGUI:
                 self.screen.blit(overlay, r)
 
     def draw_target_hotkey_badges(self):
-        """Draws a pulsing glowing digit next to each available target card during target selection."""
-        if not self.available_targets:
+        """Draws a pulsing glowing digit next to each unit card that's currently
+        selectable — target cards during ability-target selection, or the
+        awaiting-turn units when the human is picking who acts next."""
+        if self.available_targets:
+            units_to_badge = list(self.available_targets)
+            badge_color = (255, 215, 0)   # gold — targets
+        elif self.picking_unit:
+            units_to_badge = list(self.units_awaiting_turn.get(self.current_team, []))
+            badge_color = (100, 220, 130) # green — pick this unit to act
+        else:
             return
         # Pulse value in [0, 1] at ~2.5 Hz
         pulse = (math.sin(time.time() * 5.0) + 1) * 0.5
-        for i, target in enumerate(self.available_targets):
+        for i, target in enumerate(units_to_badge):
             if i >= len(TARGET_HOTKEY_KEYS):
                 break
-            # Find this target's card rect
             card_rect = next((rect for rect, unit in self.card_rects if unit is target), None)
             if not card_rect:
                 continue
             digit = str(i + 1)
-            # Player cards are in the left column, enemies in the right column.
-            # Place the badge just outside the card, on the side facing the middle of the screen.
             base_r = 22
             r = int(base_r + pulse * 4)
             if target.team == 0:
@@ -1904,14 +2053,14 @@ class GameGUI:
             else:
                 cx = card_rect.left - base_r - 6
             cy = card_rect.centery
-            # Glow layers on an alpha surface, then digit on top
             glow_size = (base_r + 12) * 2
             glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
             center = (glow_size // 2, glow_size // 2)
             outer_alpha = int(60 + pulse * 90)
             inner_alpha = int(180 + pulse * 75)
-            pygame.draw.circle(glow_surf, (255, 215, 0, outer_alpha), center, r + 8)
-            pygame.draw.circle(glow_surf, (255, 215, 0, inner_alpha), center, r)
+            r_col, g_col, b_col = badge_color
+            pygame.draw.circle(glow_surf, (r_col, g_col, b_col, outer_alpha), center, r + 8)
+            pygame.draw.circle(glow_surf, (r_col, g_col, b_col, inner_alpha), center, r)
             pygame.draw.circle(glow_surf, (255, 255, 255, 220), center, r, 2)
             digit_surf = TITLE_FONT.render(digit, True, BLACK)
             glow_surf.blit(digit_surf, digit_surf.get_rect(center=center))
@@ -2019,11 +2168,11 @@ class GameGUI:
                             self.paused = not self.paused
                         elif self.state == 'team_select':
                             self.quit_confirm = not self.quit_confirm
-                    # Battle hotkeys: Q/W/E/R/T/Y for abilities, 1..5 for target selection.
+                    # Battle hotkeys: 1..5 to pick a unit / target, Q/W/E/R/T/Y for abilities.
                     # Enemies are hotkey-controllable when their AI toggle is off.
-                    is_human_turn = (
-                        self.current_unit is not None
-                        and (self.current_unit.team == 0 or not self.enemy_ai_enabled)
+                    is_human_team_turn = (
+                        (self.current_team == 0 or not self.enemy_ai_enabled)
+                        and self.state == 'battle'
                     )
                     if (event.type == pygame.KEYDOWN
                             and self.state == 'battle'
@@ -2031,14 +2180,21 @@ class GameGUI:
                             and not self.settings_open
                             and not self.game_over
                             and not self.action_locked
-                            and is_human_turn):
-                        if self.available_targets:
+                            and is_human_team_turn):
+                        if self.picking_unit:
+                            # Pick-unit mode: digit keys choose which unit acts next.
+                            awaiting = self.units_awaiting_turn.get(self.current_team, [])
+                            for i, key in enumerate(TARGET_HOTKEY_KEYS):
+                                if event.key == key and i < len(awaiting):
+                                    self._begin_unit_turn(awaiting[i])
+                                    break
+                        elif self.available_targets:
                             # Target-selection mode: only digit keys pick a target.
                             for i, key in enumerate(TARGET_HOTKEY_KEYS):
                                 if event.key == key and i < len(self.available_targets):
                                     self.cast_selected_ability([self.available_targets[i]])
                                     break
-                        else:
+                        elif self.current_unit is not None:
                             for i, key in enumerate(ABILITY_HOTKEY_KEYS):
                                 if event.key == key and i < len(self.hotkey_abilities):
                                     self.select_move(self.hotkey_abilities[i])
@@ -2094,14 +2250,14 @@ class GameGUI:
                                 self.cast_selected_ability(targets)
                             else:
                                 self.log("")
-                                self.current_index += 1
+                                self._complete_current_unit_turn()
                                 self.next_turn()
                     if event.type == NEXT_TURN_EVENT:
                         if self.paused:
                             pygame.time.set_timer(NEXT_TURN_EVENT, 200, loops=1)
                         else:
                             pygame.time.set_timer(NEXT_TURN_EVENT, 0)
-                            self.current_index += 1
+                            self._complete_current_unit_turn()
                             self.next_turn()
                     if event.type == pygame.MOUSEMOTION and self._dragging_slider:
                         self._apply_slider(self._dragging_slider, event.pos[0])
@@ -2147,6 +2303,12 @@ class GameGUI:
                                 for button in self.game_over_buttons:
                                     if button.rect.collidepoint(event.pos):
                                         button.click()
+                            elif not self.action_locked and self.picking_unit:
+                                awaiting = self.units_awaiting_turn.get(self.current_team, [])
+                                for rect, unit in self.card_rects:
+                                    if rect.collidepoint(event.pos) and unit in awaiting:
+                                        self._begin_unit_turn(unit)
+                                        break
                             elif not self.action_locked and self.selected_ability and self.available_targets:
                                 if self.cancel_target_button and self.cancel_target_button.rect.collidepoint(event.pos):
                                     self.cancel_target_button.click()
@@ -2160,9 +2322,22 @@ class GameGUI:
                                             if button.rect.collidepoint(event.pos):
                                                 button.click()
                             elif not self.action_locked and not self.game_over:
-                                for button in self.action_buttons:
-                                    if button.rect.collidepoint(event.pos):
-                                        button.click()
+                                # Before an ability is chosen, clicking another awaiting
+                                # unit switches the active caster to that unit.
+                                _switched = False
+                                if self.selected_ability is None:
+                                    awaiting = self.units_awaiting_turn.get(self.current_team, [])
+                                    for rect, unit in self.card_rects:
+                                        if (rect.collidepoint(event.pos)
+                                                and unit in awaiting
+                                                and unit is not self.current_unit):
+                                            self._begin_unit_turn(unit)
+                                            _switched = True
+                                            break
+                                if not _switched:
+                                    for button in self.action_buttons:
+                                        if button.rect.collidepoint(event.pos):
+                                            button.click()
                         elif self.state == 'team_select':
                             if self.quit_confirm:
                                 for button in self.quit_buttons:
