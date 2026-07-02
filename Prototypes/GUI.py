@@ -193,8 +193,15 @@ class GameGUI:
     ]
 
     def __init__(self):
+        # Window/taskbar icon — must be set before set_mode on Windows for the
+        # taskbar to pick it up. Falls through silently if the image is missing.
+        try:
+            _icon_raw = pygame.image.load(_resource_path(os.path.join("images", "game.png")))
+            pygame.display.set_icon(pygame.transform.smoothscale(_icon_raw, (32, 32)))
+        except Exception:
+            pass
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption("BEST GAME EVER - Turn-Based Battle")
+        pygame.display.set_caption("FRAY")
         self.clock = pygame.time.Clock()
         self.battle = Battle()
         self.message_log = []
