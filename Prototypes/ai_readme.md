@@ -39,7 +39,7 @@ Priorities are checked top-down; the first that fires wins.
 | Priest    | Heal wounded (<40% HP)         | Rejuvenation if team avg < 70%          | Bless if no ally has it       | Smite the highest-threat / kill-shot | —                    |
 | Knight    | Sword slash for a guaranteed KO | If HP<10, only Sword slash             | Sharpen sword if not SHRPN    | Raise shield if lowest-HP ally & HP<40 | Default Sword slash  |
 | Berserker | If HP<10, only Cleave          | Frenzy if not FRENZY                    | Taunt biggest untaunted threat | Cleave (always, if any enemy)        | —                    |
-| Assassin  | Shroud if HP<40% or MP<40% and unshrouded | Stab any enemy <50% HP (prefer Marked) | Mark → Poison→cap per enemy in threat order | Shroud to stall once everyone's set up | Stab weakest (Marked preferred) |
+| Assassin  | Shroud if HP<40% or MP<40% and unshrouded | Focus <=50% HP target (prefer MARKED; else squishiest) — Mark then Stab | Setup cycle on healthy targets in squishiness order: Mark → Poison→cap, then move to next | Shroud to stall once all set up | Stab softest (Marked preferred) |
 | Thief     | Sneak if not SNEAK             | Distract the tankiest enemy             | Shiv a distracted / kill-shot | —                                    | —                    |
 | Thug      | If HP<10, only Punch (no recoil) | Riot until team at RIOT cap           | Rest if HP<40%                | Tackle (primary attack, has recoil)  | Punch fallback       |
 

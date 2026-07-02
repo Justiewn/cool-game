@@ -41,6 +41,10 @@ BUTTON_HOVER = (90, 160, 205)
 BUTTON_TEXT = WHITE
 LOG_BG = (35, 35, 35)
 LOG_TEXT = (230, 230, 230)
+# Effect-pill backgrounds
+PILL_BUFF_BG   = (60, 110, 180)  # muted blue for self / ally buff effects
+PILL_DEBUFF_BG = (170, 60, 60)   # red for enemy-applied debuff effects
+PILL_DOWNED_BG = (160, 40, 40)   # existing "Downed" pill red
 # Battle-log semantic colours
 LOG_NAME_COLOR    = (255, 215,   0)  # gold — unit names
 LOG_ABILITY_COLOR = (200, 150, 240)  # violet — ability names
@@ -275,6 +279,19 @@ class GameGUI:
             for attrs in Ability.AbilitiesDict.values()
             if attrs.get("PREVENTS_ACTION") and attrs.get("EFFECT_STATUS")
         }
+        # Pill background per EFFECT_STATUS: red for debuffs (abilities that
+        # target enemies), blue for buffs (self / ally applications).
+        # TARGET_TYPE=0 (self) always classifies as a buff — some abilities
+        # like Frenzy have TARGET_ENEMY=true set by accident even though the
+        # effect lands on the caster.
+        self._effect_pill_bg = {}
+        for _attrs in Ability.AbilitiesDict.values():
+            status = _attrs.get("EFFECT_STATUS")
+            if not status:
+                continue
+            is_self_target = _attrs.get("TARGET_TYPE") == 0
+            is_debuff = (not is_self_target) and bool(_attrs.get("TARGET_ENEMY"))
+            self._effect_pill_bg[status] = PILL_DEBUFF_BG if is_debuff else PILL_BUFF_BG
         # Ability names sorted longest-first so multi-word matches (e.g. "Sword slash")
         # win over partial single-word matches inside the same phrase.
         self._ability_name_patterns = [
@@ -1383,6 +1400,10 @@ class GameGUI:
         pill_pad = 4
         pill_gap = 3
         pill_x = x + 10
+        # Room reserved below each pill for the "ticks remaining" orb row.
+        ORB_ROW_H  = 8
+        ORB_RADIUS = 3
+        ORB_GAP    = 3
         # Clear old per-effect rects for this unit
         for key in [k for k in self.unit_effect_rects if k[0] is unit]:
             del self.unit_effect_rects[key]
@@ -1407,7 +1428,10 @@ class GameGUI:
                 display_status = "Downed" if is_downed else status
                 stacks = pill["stacks"]
                 label = "Downed" if is_downed else (f"{status} x{stacks}" if stacks > 1 else status)
-                bg_color = (160, 40, 40) if is_downed else DARK_GRAY
+                if is_downed:
+                    bg_color = PILL_DOWNED_BG
+                else:
+                    bg_color = self._effect_pill_bg.get(status, DARK_GRAY)
                 elapsed = now - pill["start_t"]
                 if pill["phase"] == "in":
                     alpha = int(255 * min(1.0, elapsed / FADE))
@@ -1421,8 +1445,8 @@ class GameGUI:
                 pill_w = text_w + pill_pad * 2
                 if pill_x + pill_w > x + card_w - 10:
                     pill_x = x + 10
-                    effect_y += pill_h + 2
-                if effect_y + pill_h > y + card_h - 2:
+                    effect_y += pill_h + ORB_ROW_H + 2
+                if effect_y + pill_h + ORB_ROW_H > y + card_h - 2:
                     break
                 # Compose the pill on an alpha surface so bg + text fade together
                 pill_surf = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
@@ -1432,10 +1456,32 @@ class GameGUI:
                 self.screen.blit(pill_surf, (pill_x, effect_y))
                 pill_rect = pygame.Rect(pill_x, effect_y, pill_w, pill_h)
                 self.unit_effect_rects[(unit, display_status)] = pill_rect
+
+                # Tick-remaining orbs — one per max(turns_left) of this status
+                # on this unit. Downed doesn't have a duration counter.
+                if not is_downed:
+                    matching = [
+                        e for e in self.battle.active_effects
+                        if e.AttrValDict.get("EFFECT_STATUS") == status
+                        and unit in e.target_list
+                    ]
+                    if matching:
+                        max_ticks = max(e.turns_left for e in matching)
+                        if max_ticks > 0:
+                            pulse = (math.sin(time.time() * 3.0) + 1) * 0.5
+                            total_w = max_ticks * (ORB_RADIUS * 2 + ORB_GAP) - ORB_GAP
+                            orbs_x = pill_rect.centerx - total_w // 2 + ORB_RADIUS
+                            orbs_y = pill_rect.bottom + ORB_ROW_H // 2 + 1
+                            outer_col = (60, 130, 200)
+                            inner_col = (170 + int(pulse * 55), 220 + int(pulse * 20), 255)
+                            for i in range(max_ticks):
+                                cx = orbs_x + i * (ORB_RADIUS * 2 + ORB_GAP)
+                                pygame.draw.circle(self.screen, outer_col, (cx, orbs_y), ORB_RADIUS + 1)
+                                pygame.draw.circle(self.screen, inner_col, (cx, orbs_y), ORB_RADIUS)
                 pill_x += pill_w + pill_gap
                 drew_any = True
             if drew_any:
-                self.unit_effect_area_rects[unit] = pygame.Rect(x + 10, effect_y_start, bar_w, effect_y + pill_h - effect_y_start)
+                self.unit_effect_area_rects[unit] = pygame.Rect(x + 10, effect_y_start, bar_w, effect_y + pill_h + ORB_ROW_H - effect_y_start)
         return rect
 
     # Precompiled log-highlight regexes: (pattern, colour, priority).

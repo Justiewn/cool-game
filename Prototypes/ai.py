@@ -17,6 +17,7 @@ Design:
 Kept free of pygame imports so it can be exercised headlessly.
 """
 
+import math
 import random
 
 from Units import Unit
@@ -67,10 +68,27 @@ def _highest_threat(units):
     return max(units, key=_threat_score) if units else None
 
 
+def _priests(units):
+    """Filter for Priest-class units — targets the AI wants to focus down first
+    because Priests heal enemy teammates and reset our damage progress."""
+    return [u for u in units if getattr(type(u), "className", "") == "Priest"]
+
+def _priority_target(enemies):
+    """Preferred non-kill-shot target: Priest first (lowest-HP among them if
+    multiple), else the highest-threat enemy overall."""
+    if not enemies:
+        return None
+    priests = _priests(enemies)
+    if priests:
+        return _lowest_hp(priests)
+    return _highest_threat(enemies)
+
+
 def _damage_target(caster, name, enemies):
     """Preferred target for a damage move:
        1. an enemy the max roll can outright kill (lowest-HP first);
-       2. otherwise the highest-threat enemy in range."""
+       2. otherwise a Priest if any is alive (focus the healer down first);
+       3. otherwise the highest-threat enemy in range."""
     if not enemies:
         return None
     base = Ability.get_attr(name, "DMG_BASE") or 0
@@ -85,7 +103,7 @@ def _damage_target(caster, name, enemies):
             break
         if max_dmg >= e.hp:
             return e
-    return _highest_threat(enemies)
+    return _priority_target(enemies)
 
 
 # ─────────────────────────── per-class strategies ─────────────────────────
@@ -169,93 +187,171 @@ def _strategy_berserker(caster):
         if enemies and _has_move(caster, "Cleave") and _can_afford(caster, "Cleave"):
             return "Cleave", enemies
         return None, None
-    # 2. Frenzy self-buff first — huge ATK/CRIT
+    # 2. Taunt FIRST — team-wide DEF debuff. Only cast if not every enemy
+    #    already has TAUNT (Taunt hits all enemies at once, so one cast
+    #    covers the whole team; recasting is wasted MP).
+    if enemies and _has_move(caster, "Taunt") and _can_afford(caster, "Taunt"):
+        if not all(_has_effect(e, "TAUNT") for e in enemies):
+            targets = _valid_targets(caster, "Taunt")
+            if targets:
+                return "Taunt", targets
+    # 3. Frenzy AFTER Taunt — Frenzy drops our DEF, so we want enemies
+    #    already debuffed (Taunted) so their return damage is minimised.
     if (_has_move(caster, "Frenzy") and _can_afford(caster, "Frenzy")
             and not _has_effect(caster, "FRENZY")):
         return "Frenzy", [caster]
-    # 2. Taunt the biggest threat if not already taunted
-    if enemies and _has_move(caster, "Taunt") and _can_afford(caster, "Taunt"):
-        untaunted = [e for e in enemies if not _has_effect(e, "TAUNT")]
-        if untaunted:
-            return "Taunt", [_highest_threat(untaunted)]
-    # 3. Cleave — always solid when 2+ enemies live
+    # 4. Cleave — always solid when 2+ enemies live
     if len(enemies) >= 2 and _has_move(caster, "Cleave") and _can_afford(caster, "Cleave"):
         return "Cleave", enemies
-    # 4. Single enemy: still Cleave if that's all we've got
+    # 5. Single enemy: still Cleave if that's all we've got
     if enemies and _has_move(caster, "Cleave") and _can_afford(caster, "Cleave"):
         return "Cleave", enemies
     return None, None
 
 
 def _strategy_assassin(caster):
-    """Optimal cycle: Mark → Poison → Poison per enemy (setting up all of them),
-    then Stab anyone the ticks have pushed under 50% HP. Shroud is a stall when
-    HP/MP get low so the poison ticks finish the job."""
+    """Focus one enemy at a time. Squishiest (lowest DEF) is always the current
+    focus. Full setup on that target = MARKED + max Poison stacks; poison is
+    skipped once the target is <50% HP (they'll die faster to a Stab). Move to
+    the next squishiest target once the current one is either fully set up
+    (and still healthy) or below 50% HP (and stabbable). Shroud is a stall for
+    low HP/MP and a "nothing else to do" fallback."""
     enemies = _enemies(caster)
     if not enemies:
         return None, None
 
     max_psn = Ability.get_attr("Poison", "EFFECT_STACKS") or 2
-    hp_low = _hp_ratio(caster) < 0.4
+    hp_low = caster.hp < 30
     mp_low = caster.mp < caster.max_mp * 0.4
 
-    # 1. Emergency Shroud — stall while poison ticks finish, refill MP, gain dodge
+    # 0. Guaranteed kill: any enemy that Stab/Backstab can drop this turn (with
+    #    or without MARK) gets stabbed NOW — that's the highest priority.
+    #    Assumes max damage roll + crit multiplier; adds the missing-HP backstab
+    #    bonus for MARKED targets. Prefer Priest, then lowest HP.
+    if _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
+        base = Ability.get_attr("Stab/Backstab", "DMG_BASE") or 0
+        roll = Ability.get_attr("Stab/Backstab", "DMG_ROLL") or 0
+        def _stab_max(target):
+            raw = caster.ATK + base + roll - target.DEF
+            # crit multiplier
+            with_crit = math.ceil(max(raw, 0) * 1.5) if raw > 0 else 0
+            best = max(raw, with_crit)
+            # Marked backstab bonus (ignores DEF)
+            if _has_effect(target, "MARKED"):
+                best += math.floor((target.max_hp - target.hp) * 0.2)
+            return best
+        kill_ready = [e for e in enemies if _stab_max(e) >= e.hp]
+        if kill_ready:
+            target = min(kill_ready, key=lambda e: (getattr(type(e), "className", "") != "Priest", e.hp))
+            return "Stab/Backstab", [target]
+
+    # 1. Shroud — only when caster is genuinely in trouble (HP<30) or MP-starved
     if ((hp_low or mp_low) and _has_move(caster, "Shroud")
             and _can_afford(caster, "Shroud") and not _has_effect(caster, "SHROUD")):
         return "Shroud", [caster]
 
-    # 2. Finisher — anyone below 50% HP gets Stabbed. Prefer Marked targets
-    #    (bonus damage from Stab/Backstab against MARKED).
-    weakened = [e for e in enemies if _hp_ratio(e) < 0.5]
-    if weakened and _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
-        marked_weak = [e for e in weakened if _has_effect(e, "MARKED")]
-        target = _lowest_hp(marked_weak or weakened)
-        return "Stab/Backstab", [target]
-
-    # 3. Setup cycle. Process enemies in threat order — highest threat first —
-    #    and for each, apply Mark then Poison-to-cap before moving to the next.
-    for e in sorted(enemies, key=_threat_score, reverse=True):
-        if not _has_effect(e, "MARKED"):
+    # 2. Finisher — any enemy at or below 50% HP.
+    #    Among the wounded, prefer a MARKED one; else pick the squishiest (lowest DEF).
+    #    On ties, prefer the Priest (heal-blocker priority).
+    #    If the chosen target isn't Marked yet → Mark first, so the backstab bonus lands.
+    #    Otherwise Stab/Backstab it.
+    weak = [e for e in enemies if _hp_ratio(e) <= 0.5]
+    if weak:
+        marked_weak = [e for e in weak if _has_effect(e, "MARKED")]
+        pool = marked_weak or weak
+        # (is_not_priest, DEF) → priests sort first; then by increasing DEF
+        target = min(pool, key=lambda e: (getattr(type(e), "className", "") != "Priest", e.DEF))
+        if not _has_effect(target, "MARKED"):
             if _has_move(caster, "Mark") and _can_afford(caster, "Mark"):
-                return "Mark", [e]
-            break  # can't afford Mark on the current target — bail to stall/fallback
-        if _stacks(e, "PSN") < max_psn:
-            if _has_move(caster, "Poison") and _can_afford(caster, "Poison"):
-                return "Poison", [e]
-            break
+                return "Mark", [target]
+        else:
+            if _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
+                return "Stab/Backstab", [target]
 
-    # 4. Everyone's fully set up — stall with Shroud (regen MP, gain dodge)
-    #    while the poison ticks bring them under 50%.
+    # 3. Priest priority — Mark then Stab, skip Poison entirely.
+    #    Priests can undo poison ticks via Heal, so drain them directly with
+    #    Stab/Backstab (bonus damage scales with their missing HP anyway).
+    #    If any priest is already MARKED, Stab that one — never Mark a second
+    #    priest while one is still marked (focus one target at a time).
+    priests = _priests(enemies)
+    if priests:
+        marked_priests = [p for p in priests if _has_effect(p, "MARKED")]
+        if marked_priests:
+            target = _lowest_hp(marked_priests)
+            if _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
+                return "Stab/Backstab", [target]
+        else:
+            target = _lowest_hp(priests)
+            if _has_move(caster, "Mark") and _can_afford(caster, "Mark"):
+                return "Mark", [target]
+
+    # 4. Setup cycle for non-Priest enemies. Squishiness order (lowest DEF first).
+    #    A target is "set up" if MARKED and at Poison cap; fully-set-up healthy
+    #    targets get skipped so focus moves to the next in order.
+    for target in sorted(enemies, key=lambda e: e.DEF):
+        if getattr(type(target), "className", "") == "Priest":
+            continue  # handled by branch 3
+        # Below-50% targets are handled by branch 2 above; only apply setup to healthy ones.
+        if _hp_ratio(target) <= 0.5:
+            continue
+        needs_mark = not _has_effect(target, "MARKED")
+        needs_poison = _stacks(target, "PSN") < max_psn
+        if not (needs_mark or needs_poison):
+            continue  # already set up — try next target in squishiness order
+        # Mark before poison so the backstab bonus is ready when they drop.
+        if needs_mark:
+            if _has_move(caster, "Mark") and _can_afford(caster, "Mark"):
+                return "Mark", [target]
+        elif needs_poison:
+            if _has_move(caster, "Poison") and _can_afford(caster, "Poison"):
+                return "Poison", [target]
+        break  # can't afford current step — bail to stall/fallback rather than jump ahead
+
+    # 4. Everyone set up (or unhittable) — stall with Shroud while poison ticks work.
     if (_has_move(caster, "Shroud") and _can_afford(caster, "Shroud")
             and not _has_effect(caster, "SHROUD")):
         return "Shroud", [caster]
 
-    # 5. Last resort — Stab whoever's weakest, preferring Marked
+    # 5. Last resort — Stab whoever's softest, preferring Marked, Priest first on ties.
     if _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
         marked = [e for e in enemies if _has_effect(e, "MARKED")]
-        target = _lowest_hp(marked or enemies)
+        pool = marked or enemies
+        target = min(pool, key=lambda e: (getattr(type(e), "className", "") != "Priest", e.DEF))
         return "Stab/Backstab", [target]
 
     return None, None
 
 
 def _strategy_thief(caster):
+    """Focus one target at a time: the squishiest enemy (lowest DEF), Priest
+    first if any alive. Sneak → Distract → Shiv, then keep Shivving until the
+    focus dies, then pick the next squishiest. Distract doesn't stack, so only
+    one Thief needs to apply it per target."""
     enemies = _enemies(caster)
-    # 1. Sneak self-buff first — big CRIT/DODGE
+    if not enemies:
+        return None, None
+
+    # Focus target: Priest first, then squishiest (lowest DEF), HP as tiebreaker
+    focus = min(
+        enemies,
+        key=lambda e: (getattr(type(e), "className", "") != "Priest", e.DEF, e.hp),
+    )
+
+    # 1. Sneak self-buff first — big CRIT / DODGE for the incoming Shivs
     if (_has_move(caster, "Sneak") and _can_afford(caster, "Sneak")
             and not _has_effect(caster, "SNEAK")):
         return "Sneak", [caster]
-    # 2. Distract the tankiest enemy for a Shiv follow-up
-    if enemies and _has_move(caster, "Distract") and _can_afford(caster, "Distract"):
-        undistracted = [e for e in enemies if not _has_effect(e, "DISTRACT")]
-        if undistracted:
-            return "Distract", [max(undistracted, key=lambda e: e.DEF)]
-    # 3. Shiv the softest / distracted target
-    if enemies and _has_move(caster, "Shiv") and _can_afford(caster, "Shiv"):
-        distracted = [e for e in enemies if _has_effect(e, "DISTRACT")]
-        if distracted:
-            return "Shiv", [_lowest_hp(distracted)]
-        return "Shiv", [_damage_target(caster, "Shiv", enemies)]
+
+    # 2. Distract the focus target if not already distracted (EFFECT_STACKS=1
+    #    so recasting on an already-distracted target is wasted MP)
+    if (_has_move(caster, "Distract") and _can_afford(caster, "Distract")
+            and not _has_effect(focus, "DISTRACT")):
+        return "Distract", [focus]
+
+    # 3. Shiv the focus target
+    if _has_move(caster, "Shiv") and _can_afford(caster, "Shiv"):
+        return "Shiv", [focus]
+
     return None, None
 
 

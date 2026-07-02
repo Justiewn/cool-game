@@ -1,6 +1,20 @@
 import time
 
 
+# EFFECT_TICKS_ON values that participate in each kind of trigger — matches the
+# semantics documented in abilities_readme.txt:
+#   0 = per turn only
+#   1 = per turn OR attacking
+#   2 = per turn OR attacked
+#   3 = per turn OR attacked OR attacking
+#   4 = attacking only
+#   5 = attacked only
+#   6 = attacked OR attacking
+_TICKS_ON_TURN_TICK       = (0, 1, 2, 3)   # fires in the four resolve_*_action / turn_* methods
+_TICKS_ON_ATTACKED        = (2, 3, 5, 6)   # fires from resolve_on_attacked
+_TICKS_ON_ATTACKING       = (1, 3, 4, 6)   # fires from resolve_on_attacking
+
+
 class Battle:
     """Encapsulates active effects and turn-based timing."""
 
@@ -112,7 +126,7 @@ class Battle:
         for effect in list(self.active_effects):
             if effect.caster != caster:
                 continue
-            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in (0, 1, 2):
+            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in _TICKS_ON_TURN_TICK:
                 continue
             if effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 1:
                 continue
@@ -128,7 +142,7 @@ class Battle:
         """TICK_OWNER=0, TICK_PHASE=0 — fires at the start of the target's turn."""
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
-            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in (0, 1, 2) or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 0:
+            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in _TICKS_ON_TURN_TICK or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 0:
                 continue
             if effect.AttrValDict.get("EFFECT_TICK_PHASE", 0) != 0:
                 continue
@@ -143,7 +157,7 @@ class Battle:
         """TICK_OWNER=1, TICK_PHASE=0 — fires at the start of the caster's turn."""
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
-            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in (0, 1, 2) or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 1:
+            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in _TICKS_ON_TURN_TICK or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 1:
                 continue
             if effect.AttrValDict.get("EFFECT_TICK_PHASE", 0) != 0:
                 continue
@@ -159,7 +173,7 @@ class Battle:
         """TICK_OWNER=1, TICK_PHASE=1 — fires at the end of the caster's action."""
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
-            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in (0, 1, 2) or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 1:
+            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in _TICKS_ON_TURN_TICK or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 1:
                 continue
             if effect.AttrValDict.get("EFFECT_TICK_PHASE", 0) != 1:
                 continue
@@ -178,7 +192,7 @@ class Battle:
         """TICK_OWNER=0, TICK_PHASE=1 — fires at the end of the target's turn."""
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
-            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in (0, 1, 2) or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 0:
+            if effect.AttrValDict.get("EFFECT_TICKS_ON", 0) not in _TICKS_ON_TURN_TICK or effect.AttrValDict.get("EFFECT_TICK_OWNER", 0) != 0:
                 continue
             if effect.AttrValDict.get("EFFECT_TICK_PHASE", 0) != 1:
                 continue
@@ -215,7 +229,7 @@ class Battle:
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
             triggers_on = effect.AttrValDict.get("EFFECT_TICKS_ON", 0)
-            if triggers_on not in (2, 4, 5):
+            if triggers_on not in _TICKS_ON_ATTACKED:
                 continue
             if target not in effect.target_list:
                 continue
@@ -230,7 +244,7 @@ class Battle:
         self.cleanup_expired_effects()
         for effect in list(self.active_effects):
             triggers_on = effect.AttrValDict.get("EFFECT_TICKS_ON", 0)
-            if triggers_on not in (1, 3, 5):
+            if triggers_on not in _TICKS_ON_ATTACKING:
                 continue
             if attacker not in effect.target_list:
                 continue
