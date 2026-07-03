@@ -76,8 +76,9 @@ CARD_W = BATTLE_COLUMN_W
 ENEMY_CARD_X = WIDTH - BATTLE_COLUMN_PAD - BATTLE_COLUMN_W
 # Battle log (small box at bottom centre)
 LOG_BOX_W = 620
-LOG_BOX_H = 200
+LOG_BOX_H = 400
 LOG_BOX_MARGIN_BOTTOM = 18
+LOG_UNHOVERED_ALPHA = 55   # nearly-transparent when the mouse isn't over the log
 
 # Hotkeys: first ability = Q, second = W, ...   first target = 1, second = 2, ...
 ABILITY_HOTKEY_LABELS = ["Q", "W", "E", "R", "T", "Y"]
@@ -1555,16 +1556,21 @@ class GameGUI:
         log_x = (WIDTH - LOG_BOX_W) // 2
         log_y = HEIGHT - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM
         info_rect = pygame.Rect(log_x, log_y, LOG_BOX_W, LOG_BOX_H)
-        log_surface = pygame.Surface((LOG_BOX_W, LOG_BOX_H), pygame.SRCALPHA)
-        log_surface.fill((LOG_BG[0], LOG_BG[1], LOG_BG[2], 170))
-        self.screen.blit(log_surface, (log_x, log_y))
-        pygame.draw.rect(self.screen, BLACK, info_rect, 2, border_radius=6)
+        # Hover check — full opacity when the mouse is over the panel, otherwise
+        # fade the whole panel (bg + border + text) to a near-transparent ghost.
+        hovered = info_rect.collidepoint(pygame.mouse.get_pos())
+        panel_alpha = 255 if hovered else LOG_UNHOVERED_ALPHA
+        # Compose everything onto one SRCALPHA surface so a single set_alpha
+        # controls background, border, title, and all colour-coded text.
+        panel = pygame.Surface((LOG_BOX_W, LOG_BOX_H), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (LOG_BG[0], LOG_BG[1], LOG_BG[2], 170),
+                         panel.get_rect(), border_radius=6)
+        pygame.draw.rect(panel, BLACK, panel.get_rect(), 2, border_radius=6)
         title = TITLE_FONT.render("Battle Log", True, WHITE)
-        self.screen.blit(title, (log_x + LOG_BOX_W // 2 - title.get_width() // 2, log_y + 6))
+        panel.blit(title, (LOG_BOX_W // 2 - title.get_width() // 2, 6))
         pad = 10
         header_h = TITLE_FONT.get_linesize() + 8
         visible_height = LOG_BOX_H - header_h - pad
-        log_rect = pygame.Rect(log_x + pad, log_y + header_h, LOG_BOX_W - pad * 2, visible_height)
         line_height = SMALL_FONT.get_linesize()
         max_lines = visible_height // line_height
         start_index = max(0, min(self.log_scroll, max(0, len(self.message_log) - max_lines)))
@@ -1575,10 +1581,11 @@ class GameGUI:
             for u in Unit.get_units("all", team):
                 if u.name:
                     unit_names.add(u.name)
+        row_left = pad
+        row_right = LOG_BOX_W - pad
         for i, line in enumerate(visible_logs):
             segments = self._color_log_segments(line, unit_names)
-            x_cursor = log_rect.x
-            row_right = log_rect.right
+            x_cursor = row_left
             for text, colour in segments:
                 if x_cursor >= row_right:
                     break
@@ -1586,11 +1593,16 @@ class GameGUI:
                 max_w = row_right - x_cursor
                 if surf.get_width() > max_w:
                     surf = surf.subsurface((0, 0, max_w, surf.get_height()))
-                self.screen.blit(surf, (x_cursor, log_rect.y + i * line_height))
+                panel.blit(surf, (x_cursor, header_h + i * line_height))
                 x_cursor += surf.get_width()
         if len(self.message_log) > max_lines:
-            scroll_text = SMALL_FONT.render(f"{start_index + 1}-{min(start_index + max_lines, len(self.message_log))}/{len(self.message_log)}", True, LOG_TEXT)
-            self.screen.blit(scroll_text, (log_x + LOG_BOX_W - scroll_text.get_width() - 8, log_y + 8))
+            scroll_text = SMALL_FONT.render(
+                f"{start_index + 1}-{min(start_index + max_lines, len(self.message_log))}/{len(self.message_log)}",
+                True, LOG_TEXT,
+            )
+            panel.blit(scroll_text, (LOG_BOX_W - scroll_text.get_width() - 8, 8))
+        panel.set_alpha(panel_alpha)
+        self.screen.blit(panel, (log_x, log_y))
         self._log_box_rect = info_rect
 
     def get_available_targets_for_move(self, move_name):

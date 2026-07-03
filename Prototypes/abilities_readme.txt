@@ -94,8 +94,17 @@ What happens to this effect when the target is downed
 0 = effect is removed when the target is downed
 1 = effect persists through downing; only removed when the target is permanently killed
 
-EFFECT_STACKS [3] (int) 
-How many instances of this effect can exist on a target, (1 for no stacking) 
+EFFECT_STACKS [3] (int)
+How many instances of this effect can exist on a target, (1 for no stacking)
+
+EFFECT_STACK_RENEWS (bool, optional; default false)
+Controls what happens to existing stacks when a new one is added:
+false = each stack tracks its own turns_left independently, so the oldest
+        stack expires first even if a newer one was just applied.
+true  = adding a new stack refreshes ALL existing stacks of the same
+        EFFECT_STATUS on the target back to full TICKS duration, so the
+        effect expires as one bundle rather than in staggered ticks.
+Only meaningful for stackable effects (EFFECT_STACKS > 1).
 
 EFFECT_STATUS (str) 
 the text displayed on the status pill

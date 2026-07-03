@@ -143,6 +143,7 @@
       "EFFECT_CASTER_DEATH": 1,
       "EFFECT_TARGET_DEATH": 0,
       "EFFECT_STACKS": 5,
+      "EFFECT_STACK_RENEWS": true,
       "EFFECT_STATUS": "RIOT",
       "EFFECT_TOOLTIP": "ATK+2 CRIT+3",
       "EFFECT_VALUES": {

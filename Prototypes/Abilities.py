@@ -163,6 +163,19 @@ class Ability():
             caster.mp -= self.AttrValDict["MP_COST"]
 
         if self.turns_left > 0 and success:
+            # If EFFECT_STACK_RENEWS is set on this ability, refresh the turns_left
+            # of every existing stack on each target so all stacks share the
+            # newest expiry. Default False = each stack tracks its own duration.
+            if self.AttrValDict.get("IS_EFFECT") and self.AttrValDict.get("EFFECT_STACK_RENEWS"):
+                status = self.AttrValDict.get("EFFECT_STATUS")
+                fresh_ticks = self.AttrValDict.get("TICKS", 0)
+                if status and fresh_ticks > 0:
+                    for existing in battle.active_effects:
+                        if existing.AttrValDict.get("EFFECT_STATUS") != status:
+                            continue
+                        if not any(t in existing.target_list for t in target_list):
+                            continue
+                        existing.turns_left = fresh_ticks
             if self.AttrValDict["IS_EFFECT"] and len(target_list) > 1:
                 # Multi-target buffs/debuffs use one effect instance per target
                 # so each unit tracks duration independently.
