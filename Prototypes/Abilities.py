@@ -371,7 +371,7 @@ class Ability():
     def Taunt(self, target, caster=None):                                                                                  
         if self.turns_left == self.AttrValDict["TICKS"]:      #if just cast, 
             self.effect_stat_modifier("add", target)
-            print("{}'s DEF has decreased by 6!".format(str(target)))
+            print("{}'s DEF has decreased by 5!".format(str(target)))
         elif self.turns_left == 0:                                                           #reverse effects in last turn
             self.effect_stat_modifier("remove", target)
             print("{} regains his composure. His DEF returns to normal".format(str(target)))
@@ -379,9 +379,16 @@ class Ability():
     #
     def Riot(self, target, caster=None):
         # Active team buff: ATK+2 CRIT+3 for several turns, stacks up to 5.
+        # Condense the per-ally buff line into one team-wide log entry —
+        # a full 5-thug Riot would otherwise flood the log with 6 lines.
         if self.turns_left == self.AttrValDict["TICKS"]:
             self.effect_stat_modifier("add", target)
-            print("{}'s ATK increased by 2 and CRIT increased by 3!".format(str(target)))
+            if target is self.target_list[-1]:
+                if self.AttrValDict.get("TARGET_TYPE") == 3:
+                    subject = "The enemy team" if self.AttrValDict.get("TARGET_ENEMY") else "Their team"
+                else:
+                    subject = ", ".join(str(t) for t in self.target_list)
+                print("{}: ATK +2, CRIT +3!".format(subject))
         elif self.turns_left == 0:
             self.effect_stat_modifier("remove", target)
             print("{} regains his composure. His ATK and CRIT return to normal.".format(str(target)))
@@ -432,8 +439,8 @@ class Ability():
 
     #
     def Tackle(self, target, caster):
-        # Damages target normally, hits caster for a fixed recoil,
-        # and rolls 25% to apply a 1-turn Stun on the target.
+        # Damages target normally, hits caster for recoil = half of the
+        # pre-DEF damage roll, and rolls 20% to apply a 1-turn Stun.
         raw_damage = self.calculate_dmg(caster, "NORMAL")
         final_damage = self.calculate_def(raw_damage, target, "NORMAL")
         is_crit = random.random() < caster.CRIT / 100
@@ -442,8 +449,10 @@ class Ability():
         Ability.damage_target(final_damage, target, "NORMAL", is_crit)
         self.last_damage_dealt = getattr(self, 'last_damage_dealt', 0) + max(0, final_damage)
 
-        # Recoil to caster — 12% of max HP, minimum 3
-        recoil = max(3, math.floor(caster.max_hp * 0.12))
+        # Recoil to caster — 65% of the pre-DEF damage. Using the raw
+        # (pre-DEF, pre-crit) figure keeps the cost tied to the tackle's
+        # own strength rather than the target's armour or luck.
+        recoil = max(0, math.floor(raw_damage * 0.65))
         caster.hp -= recoil
         print("{} takes {} recoil damage from the tackle!".format(str(caster), recoil))
 

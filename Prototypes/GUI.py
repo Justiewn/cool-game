@@ -57,6 +57,7 @@ AI_SHOW_EVENT = pygame.USEREVENT + 2
 NEXT_TURN_EVENT = pygame.USEREVENT + 3
 HIT_SOUND_EVENT = pygame.USEREVENT + 4
 MUSIC_END_EVENT = pygame.USEREVENT + 5
+TEAM_SWITCH_EVENT = pygame.USEREVENT + 6
 HIT_DMG_LIGHT = 14
 HIT_DMG_MEDIUM = 26
 FONT = pygame.font.SysFont("arial", 18)
@@ -71,14 +72,26 @@ BATTLE_COLUMN_W = 280              # card width inside a team column
 BATTLE_COLUMN_PAD = 30             # outer padding from screen edge
 ACTION_BTN_W = 210                 # ability button width
 ACTION_BTN_GAP = 10                # gap between card edge and action button column
+# Ability-button fan (replaces the old vertical stack)
+ABILITY_FAN_RADIUS = 200           # distance from card anchor to middle button
+ABILITY_FAN_SPREAD_DEG = 80        # total arc angle across all buttons (sized so a 5-unit column's top/bottom cards still keep their fan on-screen)
+ABILITY_FAN_IN_DURATION = 0.25     # fan-out + fade-in from card anchor
+ABILITY_FAN_STATE_FADE = 0.2       # alpha transition when selection state changes
+ABILITY_ALPHA_TARGETING = 100      # non-selected buttons dim while picking a target
+ABILITY_ALPHA_CASTING = 0          # non-selected buttons fully hide once target is committed
 PLAYER_CARD_X = BATTLE_COLUMN_PAD
 CARD_W = BATTLE_COLUMN_W
 ENEMY_CARD_X = WIDTH - BATTLE_COLUMN_PAD - BATTLE_COLUMN_W
 # Battle log (small box at bottom centre)
 LOG_BOX_W = 620
 LOG_BOX_H = 400
-LOG_BOX_MARGIN_BOTTOM = 18
+LOG_BOX_MARGIN_BOTTOM = 80
 LOG_UNHOVERED_ALPHA = 55   # nearly-transparent when the mouse isn't over the log
+# New-message animation: slide in from below the log's bottom row, hold at full
+# opacity, then fade to match the rest of the log (panel_alpha).
+LOG_SLIDE_DURATION = 0.25
+LOG_FULL_OPACITY_DURATION = 1.0
+LOG_FADE_DURATION = 0.4
 
 # Hotkeys: first ability = Q, second = W, ...   first target = 1, second = 2, ...
 ABILITY_HOTKEY_LABELS = ["Q", "W", "E", "R", "T", "Y"]
@@ -624,7 +637,7 @@ class GameGUI:
         cy = self.screen.get_height() // 2
         self.game_over_buttons = [
             Button((WIDTH // 2 - 220, cy + 20, 200, 50), "Restart Battle", self.replay, color=GREEN),
-            Button((WIDTH // 2 + 20, cy + 20, 200, 50), "Go to Selection", self.go_to_selection, color=BLUE),
+            Button((WIDTH // 2 + 20, cy + 20, 200, 50), "Return to Selection", self.go_to_selection, color=BLUE),
         ]
 
     def _setup_pause_buttons(self):
@@ -666,8 +679,8 @@ class GameGUI:
         self._settings_close_btn      = Button(_r.copy(), "X", lambda: setattr(self, 'settings_open', False), color=(160, 40, 40), hover_color=(200, 60, 60))
         self._settings_fullscreen_btn = Button(_r.copy(), "", self._toggle_fullscreen, color=DARK_GRAY, hover_color=(65, 65, 65))
         self._settings_fps_btn        = Button(_r.copy(), "", self._toggle_fps,        color=DARK_GRAY, hover_color=(65, 65, 65))
-        self._settings_quit_sel_btn   = Button(_r.copy(), "Quit to Selection", self._settings_do_quit_to_sel, color=(160, 100, 30), hover_color=(200, 130, 40))
-        self._settings_quit_game_btn  = Button(_r.copy(), "Quit Game",         self._do_quit,                color=(160, 40,  40), hover_color=(200, 60,  60))
+        self._settings_quit_sel_btn   = Button(_r.copy(), "Return to Selection", self._settings_do_quit_to_sel, color=(160, 100, 30), hover_color=(200, 130, 40))
+        self._settings_quit_game_btn  = Button(_r.copy(), "Exit Game",         self._do_quit,                color=(160, 40,  40), hover_color=(200, 60,  60))
         self._slider_rects = {}
 
     def _settings_do_quit_to_sel(self):
@@ -916,9 +929,9 @@ class GameGUI:
         self.next_turn()
 
     def log(self, message):
-        # timestamp = time.strftime("%H:%M:%S")
-        # self.message_log.append(f"[{timestamp}] {message}")
-        self.message_log.append(f"{message}")
+        # Each entry is (text, arrival_time) — arrival_time drives the
+        # slide-in + fade animation in draw_info_panel.
+        self.message_log.append((f"{message}", time.time()))
         self.message_log = self.message_log[-50:]
         max_lines = 7
         if len(self.message_log) <= max_lines:
@@ -982,19 +995,11 @@ class GameGUI:
                 self.game_over = True
                 self.info_text = self.get_winner_text()
                 return
-            # 3. Switch to the other team and populate its awaiting list —
-            #    stunned units on the incoming team are excluded, they'll get
-            #    the same team-turn-end batching when their turn ends.
-            self.current_team = 1 - self.current_team
-            self.units_awaiting_turn[self.current_team] = [
-                u for u in Unit.get_units("all", self.current_team)
-                if u.alive and not u.dead and not self._get_incap_status(u)
-            ]
-            # Fire PHASE=0 ticks for the new team (already skips stunned units)
-            self._fire_team_turn_start_ticks(self.current_team)
-            if self.game_over:
-                return
-            self.next_turn()
+            # 3. Pause 1s before the next team's turn so the player can read
+            #    the wrap-up log (incap ticks, downed processing). The actual
+            #    switch happens in _start_next_team_turn once TEAM_SWITCH_EVENT
+            #    fires — non-blocking so log animations keep playing.
+            pygame.time.set_timer(TEAM_SWITCH_EVENT, 1000, loops=1)
             return
 
         is_human_team = (self.current_team == 0) or (not self.enemy_ai_enabled)
@@ -1015,6 +1020,20 @@ class GameGUI:
             if picked is None:
                 picked = awaiting[0]
             self._begin_unit_turn(picked)
+
+    def _start_next_team_turn(self):
+        """Fires when TEAM_SWITCH_EVENT elapses — completes the deferred half
+        of next_turn: swap sides, populate the new team's awaiting list,
+        fire its turn-start ticks, and hand off to next_turn."""
+        self.current_team = 1 - self.current_team
+        self.units_awaiting_turn[self.current_team] = [
+            u for u in Unit.get_units("all", self.current_team)
+            if u.alive and not u.dead and not self._get_incap_status(u)
+        ]
+        self._fire_team_turn_start_ticks(self.current_team)
+        if self.game_over:
+            return
+        self.next_turn()
 
     def _begin_unit_turn(self, unit):
         """Called once a unit has been chosen (by click, hotkey, or AI).
@@ -1089,20 +1108,25 @@ class GameGUI:
         card_y = col_top + unit_index * v_spacing
 
         BTN_H = 38
-        BTN_GAP = 6
         BTN_W = ACTION_BTN_W
-        # Player: buttons stack to the right of the card. Enemy: to the left.
-        if is_player:
-            btn_x = card_x + card_w + ACTION_BTN_GAP
-        else:
-            btn_x = card_x - ACTION_BTN_GAP - BTN_W
 
         other_moves = [m for m in moves if m != "Rest"]
         has_rest = "Rest" in moves
         # Rest nearest to card (= first), then other moves below
         ordered = (["Rest"] + other_moves) if has_rest else other_moves
-
         self.hotkey_abilities = list(ordered)   # index → move name
+
+        # Fan layout: buttons arranged along an arc centred on the card's near
+        # edge (right edge for player, left for enemy). Middle button pokes
+        # out furthest; the ends tuck back toward the card, like a hand of cards.
+        n = len(ordered)
+        anchor_x = card_x + card_w if is_player else card_x
+        anchor_y = card_y + card_h // 2
+        spawn_t = time.time()
+        # All buttons start collapsed at the anchor (rect topleft such that the
+        # anchor lands on the button's centre) and fan out from there.
+        fan_origin_topleft = (anchor_x - BTN_W // 2, anchor_y - BTN_H // 2)
+
         for i, move in enumerate(ordered):
             def make_action(move_name=move):
                 return lambda: self.select_move(move_name)
@@ -1114,16 +1138,40 @@ class GameGUI:
                     mp_cost = Ability.get_attr(move, "MP_COST") or 0
             except Exception:
                 tooltip, mp_cost = "", 0
-            btn_y = card_y + i * (BTN_H + BTN_GAP)
+            # Angle: −SPREAD/2 (top) to +SPREAD/2 (bottom), evenly spaced.
+            if n == 1:
+                angle_deg = 0.0
+            else:
+                angle_deg = -ABILITY_FAN_SPREAD_DEG / 2 + i * (ABILITY_FAN_SPREAD_DEG / (n - 1))
+            angle_rad = math.radians(angle_deg)
+            dx = ABILITY_FAN_RADIUS * math.cos(angle_rad)
+            dy = ABILITY_FAN_RADIUS * math.sin(angle_rad)
+            # Mirror the fan for enemy so it opens to the left instead of right.
+            if not is_player:
+                dx = -dx
+            cx = anchor_x + dx
+            cy = anchor_y + dy
+            btn_x = int(cx - BTN_W / 2)
+            btn_y = int(cy - BTN_H / 2)
             rect = (btn_x, btn_y, BTN_W, BTN_H)
             right_text = f"MP {mp_cost}" if move != "Rest" else ""
             left_text = ABILITY_HOTKEY_LABELS[i] if i < len(ABILITY_HOTKEY_LABELS) else ""
             not_enough_mp = move != "Rest" and mp_cost > self.current_unit.mp
             btn_color = (90, 90, 90) if not_enough_mp else BUTTON_COLOR
             btn_hover = (110, 110, 110) if not_enough_mp else BUTTON_HOVER
-            self.action_buttons.append(Button(rect, move, make_action(), color=btn_color,
-                                            hover_color=btn_hover, tooltip=tooltip,
-                                            right_text=right_text, left_text=left_text))
+            btn = Button(rect, move, make_action(), color=btn_color,
+                         hover_color=btn_hover, tooltip=tooltip,
+                         right_text=right_text, left_text=left_text)
+            # Animation bookkeeping consumed by draw_buttons.
+            btn.fan_spawn_t = spawn_t
+            btn.fan_origin_topleft = fan_origin_topleft
+            btn.fan_target_topleft = (btn_x, btn_y)
+            # Target alpha starts at 255 (visible); animated alpha eases up from 0
+            # over ABILITY_FAN_STATE_FADE via the fade-toward-target logic below.
+            btn.state_alpha_target = 255
+            btn.state_alpha_start_val = 0
+            btn.state_alpha_start_t = spawn_t
+            self.action_buttons.append(btn)
 
     def select_move(self, move_name):
         if self.game_over:
@@ -1149,6 +1197,10 @@ class GameGUI:
         if not self.selected_ability or not targets:
             return
         self.action_locked = True
+        # Target is now committed — clear the target-selection signal so the
+        # ability-button fade transitions from "targeting" (dim to 100) to
+        # "casting" (fade to 0), and the cancel-X + hover targets disappear.
+        self.available_targets = None
         self._pending_hit_sound = None
         # PHASE=0 ticks (turn_start, before_action) fire once per team turn now,
         # so nothing to tick here — just play the cast and resolve PHASE=1 after.
@@ -1196,8 +1248,12 @@ class GameGUI:
         pygame.time.set_timer(AI_SHOW_EVENT, 600, loops=1)
 
     def _get_slot_layout(self, team_size):
-        """Returns (v_spacing, card_w, card_h) for a vertical column of unit cards."""
-        available_h = HEIGHT - 2 * BATTLE_COLUMN_PAD - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM
+        """Returns (v_spacing, card_w, card_h) for a vertical column of unit cards.
+        Card columns sit at the screen edges and the log sits centred at the
+        bottom, so the columns can extend the full screen height without
+        colliding with the log — that lets 4-5 unit teams keep cards big
+        enough for the avatar/pill row to still render."""
+        available_h = HEIGHT - 2 * BATTLE_COLUMN_PAD
         gap = 10
         n = max(team_size, 1)
         card_h = max(90, min(170, (available_h - (n - 1) * gap) // n))
@@ -1273,9 +1329,11 @@ class GameGUI:
         return int(round(self.awaiting_nudge_pos.get(id(unit), 0.0)))
 
     def _column_top_y(self, team_units_visible, v_spacing, card_h):
-        """Vertical origin for a team's card column — centred in the playable band."""
+        """Vertical origin for a team's card column — centred in the full screen
+        band (columns are horizontally offset from the log so they don't need
+        to stop above it)."""
         top_edge = BATTLE_COLUMN_PAD
-        bottom_edge = HEIGHT - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM
+        bottom_edge = HEIGHT - BATTLE_COLUMN_PAD
         n = max(team_units_visible, 1)
         total_h = (n - 1) * v_spacing + card_h
         return top_edge + max(0, (bottom_edge - top_edge - total_h) // 2)
@@ -1354,7 +1412,10 @@ class GameGUI:
             border_color = RED
         pygame.draw.rect(self.screen, border_color, rect, 2, border_radius=10)
 
-        show_avatar = card_h >= 110
+        # Below this, the avatar's ~70px header leaves no room for the effect-pill
+        # row beneath the HP/MP bars, so pills silently stop rendering (happens at
+        # 4-5 unit team sizes, where card_h shrinks to fit the column).
+        show_avatar = card_h >= 150
         if show_avatar:
             avatar_rect = pygame.Rect(x + 10, y + 10, 48, 48)
             pygame.draw.rect(self.screen, WHITE, avatar_rect, border_radius=5)
@@ -1560,21 +1621,31 @@ class GameGUI:
         # fade the whole panel (bg + border + text) to a near-transparent ghost.
         hovered = info_rect.collidepoint(pygame.mouse.get_pos())
         panel_alpha = 255 if hovered else LOG_UNHOVERED_ALPHA
-        # Compose everything onto one SRCALPHA surface so a single set_alpha
-        # controls background, border, title, and all colour-coded text.
-        panel = pygame.Surface((LOG_BOX_W, LOG_BOX_H), pygame.SRCALPHA)
-        pygame.draw.rect(panel, (LOG_BG[0], LOG_BG[1], LOG_BG[2], 170),
-                         panel.get_rect(), border_radius=6)
-        pygame.draw.rect(panel, BLACK, panel.get_rect(), 2, border_radius=6)
-        title = TITLE_FONT.render("Battle Log", True, WHITE)
-        panel.blit(title, (LOG_BOX_W // 2 - title.get_width() // 2, 6))
         pad = 10
-        header_h = TITLE_FONT.get_linesize() + 8
-        visible_height = LOG_BOX_H - header_h - pad
+        title_bar_h = TITLE_FONT.get_linesize() + 8
+        visible_height = LOG_BOX_H - title_bar_h - pad
         line_height = SMALL_FONT.get_linesize()
         max_lines = visible_height // line_height
         start_index = max(0, min(self.log_scroll, max(0, len(self.message_log) - max_lines)))
-        visible_logs = self.message_log[start_index:start_index + max_lines]
+        # Base panel (bg + border + title + scroll indicator) fades uniformly
+        # with hover state; messages get their own per-entry alpha below.
+        # Title sits in a bottom strip so newest rows appear directly above it.
+        base_panel = pygame.Surface((LOG_BOX_W, LOG_BOX_H), pygame.SRCALPHA)
+        pygame.draw.rect(base_panel, (LOG_BG[0], LOG_BG[1], LOG_BG[2], 170),
+                         base_panel.get_rect(), border_radius=6)
+        pygame.draw.rect(base_panel, BLACK, base_panel.get_rect(), 2, border_radius=6)
+        title = TITLE_FONT.render("Battle Log", True, WHITE)
+        title_top = LOG_BOX_H - title_bar_h + (title_bar_h - TITLE_FONT.get_linesize()) // 2
+        base_panel.blit(title, (LOG_BOX_W // 2 - title.get_width() // 2, title_top))
+        if len(self.message_log) > max_lines:
+            scroll_text = SMALL_FONT.render(
+                f"{start_index + 1}-{min(start_index + max_lines, len(self.message_log))}/{len(self.message_log)}",
+                True, LOG_TEXT,
+            )
+            scroll_y = LOG_BOX_H - title_bar_h + (title_bar_h - SMALL_FONT.get_linesize()) // 2
+            base_panel.blit(scroll_text, (LOG_BOX_W - scroll_text.get_width() - 8, scroll_y))
+        base_panel.set_alpha(panel_alpha)
+        self.screen.blit(base_panel, (log_x, log_y))
         # Snapshot unit names once per frame — used for gold-highlight of names
         unit_names = set()
         for team in (0, 1):
@@ -1583,26 +1654,67 @@ class GameGUI:
                     unit_names.add(u.name)
         row_left = pad
         row_right = LOG_BOX_W - pad
-        for i, line in enumerate(visible_logs):
-            segments = self._color_log_segments(line, unit_names)
-            x_cursor = row_left
-            for text, colour in segments:
-                if x_cursor >= row_right:
-                    break
-                surf = SMALL_FONT.render(text, True, colour)
-                max_w = row_right - x_cursor
-                if surf.get_width() > max_w:
-                    surf = surf.subsurface((0, 0, max_w, surf.get_height()))
-                panel.blit(surf, (x_cursor, header_h + i * line_height))
-                x_cursor += surf.get_width()
-        if len(self.message_log) > max_lines:
-            scroll_text = SMALL_FONT.render(
-                f"{start_index + 1}-{min(start_index + max_lines, len(self.message_log))}/{len(self.message_log)}",
-                True, LOG_TEXT,
-            )
-            panel.blit(scroll_text, (LOG_BOX_W - scroll_text.get_width() - 8, 8))
-        panel.set_alpha(panel_alpha)
-        self.screen.blit(panel, (log_x, log_y))
+        row_width = row_right - row_left
+        # If the newest message is still animating in AND is inside the current
+        # visible window, slide all rows down by (1 - progress) * line_height
+        # and pull the message just above the window in from row -1 so the top
+        # row scrolls off smoothly.
+        now = time.time()
+        slide_progress = 1.0
+        include_prewindow = False
+        newest_visible = (
+            self.message_log
+            and start_index + max_lines >= len(self.message_log)
+        )
+        if newest_visible:
+            slide_age = now - self.message_log[-1][1]
+            if slide_age < LOG_SLIDE_DURATION:
+                slide_progress = slide_age / LOG_SLIDE_DURATION
+                include_prewindow = start_index > 0
+        if include_prewindow:
+            render_start = start_index - 1
+        else:
+            render_start = start_index
+        rendered = self.message_log[render_start:start_index + max_lines]
+        # Bottom-anchor: the last entry in `rendered` sits on the bottom row
+        # (just above the title bar); shorter logs leave the TOP of the panel
+        # empty rather than the bottom.
+        bottom_anchor = max_lines - len(rendered)
+        shift_y = (1.0 - slide_progress) * line_height
+        # Clip messages to the content area so the sliding pre-window row
+        # doesn't bleed above the top padding and the new row emerges from
+        # just above the bottom title bar rather than through it.
+        text_clip = pygame.Rect(log_x, log_y + pad, LOG_BOX_W, visible_height)
+        old_clip = self.screen.get_clip()
+        self.screen.set_clip(text_clip)
+        try:
+            for offset_i, entry in enumerate(rendered):
+                text_line, arrival_time = entry
+                age = now - arrival_time
+                if age < LOG_FULL_OPACITY_DURATION:
+                    msg_alpha = 255
+                elif age < LOG_FULL_OPACITY_DURATION + LOG_FADE_DURATION:
+                    p = (age - LOG_FULL_OPACITY_DURATION) / LOG_FADE_DURATION
+                    msg_alpha = int(round(255 + (panel_alpha - 255) * p))
+                else:
+                    msg_alpha = panel_alpha
+                rank = offset_i + bottom_anchor
+                y = log_y + pad + rank * line_height + shift_y
+                line_surf = pygame.Surface((row_width, line_height), pygame.SRCALPHA)
+                x_cursor = 0
+                for text, colour in self._color_log_segments(text_line, unit_names):
+                    if x_cursor >= row_width:
+                        break
+                    surf = SMALL_FONT.render(text, True, colour)
+                    max_w = row_width - x_cursor
+                    if surf.get_width() > max_w:
+                        surf = surf.subsurface((0, 0, max_w, surf.get_height()))
+                    line_surf.blit(surf, (x_cursor, 0))
+                    x_cursor += surf.get_width()
+                line_surf.set_alpha(msg_alpha)
+                self.screen.blit(line_surf, (log_x + row_left, y))
+        finally:
+            self.screen.set_clip(old_clip)
         self._log_box_rect = info_rect
 
     def get_available_targets_for_move(self, move_name):
@@ -2087,12 +2199,26 @@ class GameGUI:
         """Draws a pulsing glowing digit next to each unit card that's currently
         selectable — target cards during ability-target selection, or the
         awaiting-turn units when the human is picking who acts next."""
+        is_human_team = (self.current_team == 0) or (not self.enemy_ai_enabled)
+        skip_current_unit = False
         if self.available_targets:
             units_to_badge = list(self.available_targets)
             badge_color = (255, 215, 0)   # gold — targets
         elif self.picking_unit:
             units_to_badge = list(self.units_awaiting_turn.get(self.current_team, []))
             badge_color = (100, 220, 130) # green — pick this unit to act
+        elif (is_human_team
+              and self.current_unit is not None
+              and self.selected_ability is None
+              and not self.action_locked):
+            # A caster is picked and the ability list is up, but nothing has
+            # been committed yet — show the swap-caster hotkeys on the other
+            # awaiting units. The currently-selected unit is skipped inside
+            # the loop (not filtered from the list) so digit indices stay in
+            # lockstep with the KEYDOWN handler's `awaiting[i]` mapping.
+            units_to_badge = list(self.units_awaiting_turn.get(self.current_team, []))
+            badge_color = (100, 220, 130)
+            skip_current_unit = True
         else:
             return
         # Pulse value in [0, 1] at ~2.5 Hz
@@ -2100,6 +2226,8 @@ class GameGUI:
         for i, target in enumerate(units_to_badge):
             if i >= len(TARGET_HOTKEY_KEYS):
                 break
+            if skip_current_unit and target is self.current_unit:
+                continue
             card_rect = next((rect for rect, unit in self.card_rects if unit is target), None)
             if not card_rect:
                 continue
@@ -2129,7 +2257,7 @@ class GameGUI:
         if self.scenario_preview_image_fullscreen is not None:
             img = self.scenario_preview_image_fullscreen
             bg_x = (WIDTH - img.get_width()) // 2
-            bg_y = (HEIGHT - LOG_BOX_H - LOG_BOX_MARGIN_BOTTOM - img.get_height()) // 2
+            bg_y = (HEIGHT - img.get_height()) // 2
             self.screen.blit(img, (bg_x, bg_y))
         elif self.scenario_preview_image is not None:
             self.draw_scenario_preview()
@@ -2168,17 +2296,84 @@ class GameGUI:
             self.draw_settings_overlay()
         pygame.display.flip()
 
+    def _compute_ability_button_alpha(self, button, now):
+        """Ease the ability button's alpha toward its state-driven target so
+        state changes (targeting / casting) fade smoothly. Combined with the
+        fan-in spawn state (start_val=0, target=255 at spawn), the initial
+        appearance also fades in over ABILITY_FAN_STATE_FADE seconds."""
+        if self.selected_ability and button.text != self.selected_ability.ABILITY_NAME:
+            # Targeting signals: player picking (available_targets) or AI
+            # preparing/showing (ai_pending_targets / ai_targeted_units).
+            # cast_selected_ability clears these before firing, so their
+            # absence with selected_ability still set = commit → casting.
+            in_targeting = bool(self.available_targets
+                                or getattr(self, 'ai_pending_targets', None)
+                                or getattr(self, 'ai_targeted_units', None))
+            target = ABILITY_ALPHA_TARGETING if in_targeting else ABILITY_ALPHA_CASTING
+        else:
+            target = 255
+        if button.state_alpha_target != target:
+            # Snapshot the interpolated alpha at the moment of the state change
+            # so the new tween starts from wherever we are right now.
+            old_age = now - button.state_alpha_start_t
+            old_target = button.state_alpha_target
+            if old_age >= ABILITY_FAN_STATE_FADE:
+                current = old_target
+            else:
+                p = old_age / ABILITY_FAN_STATE_FADE
+                eased = 1 - (1 - p) ** 2
+                current = int(button.state_alpha_start_val
+                              + (old_target - button.state_alpha_start_val) * eased)
+            button.state_alpha_start_val = current
+            button.state_alpha_start_t = now
+            button.state_alpha_target = target
+        age = now - button.state_alpha_start_t
+        if age >= ABILITY_FAN_STATE_FADE:
+            return button.state_alpha_target
+        p = age / ABILITY_FAN_STATE_FADE
+        eased = 1 - (1 - p) ** 2
+        return int(button.state_alpha_start_val
+                   + (button.state_alpha_target - button.state_alpha_start_val) * eased)
+
     def draw_buttons(self):
         mouse_pos = pygame.mouse.get_pos()
         self.hovered_ability_button = None
         self.cancel_target_button = None
         if self.state == 'battle' and not self.game_over:
+            now = time.time()
             for button in self.action_buttons:
+                # Fan-out position: ease-out cubic from card anchor to final.
+                if hasattr(button, 'fan_spawn_t'):
+                    age = now - button.fan_spawn_t
+                    if age < ABILITY_FAN_IN_DURATION:
+                        progress = age / ABILITY_FAN_IN_DURATION
+                        eased = 1 - (1 - progress) ** 3
+                        ox, oy = button.fan_origin_topleft
+                        tx, ty = button.fan_target_topleft
+                        button.rect.topleft = (
+                            int(ox + (tx - ox) * eased),
+                            int(oy + (ty - oy) * eased),
+                        )
+                    else:
+                        button.rect.topleft = button.fan_target_topleft
                 if not self.paused:
                     button.update(mouse_pos)
                     if button.hover:
                         self.hovered_ability_button = button
-                button.draw(self.screen)
+                alpha = self._compute_ability_button_alpha(button, now) if hasattr(button, 'fan_spawn_t') else 255
+                if alpha >= 255:
+                    button.draw(self.screen)
+                elif alpha > 0:
+                    # Render onto a temp SRCALPHA surface with the button
+                    # temporarily positioned at (0,0), then blit with alpha.
+                    temp = pygame.Surface(button.rect.size, pygame.SRCALPHA)
+                    orig_rect = button.rect
+                    button.rect = pygame.Rect(0, 0, orig_rect.width, orig_rect.height)
+                    button.draw(temp)
+                    button.rect = orig_rect
+                    temp.set_alpha(alpha)
+                    self.screen.blit(temp, orig_rect.topleft)
+                # alpha == 0: skip drawing entirely.
 
             if self.selected_ability and self.available_targets:
                 selected_button = next((b for b in self.action_buttons if b.text == self.selected_ability.ABILITY_NAME), None)
@@ -2253,10 +2448,23 @@ class GameGUI:
                                     self.cast_selected_ability([self.available_targets[i]])
                                     break
                         elif self.current_unit is not None:
+                            # Ability list is up. Q/W/E/R/… still pick an
+                            # ability, and 1..5 now switches to another
+                            # awaiting caster (no ability committed yet).
+                            ability_taken = False
                             for i, key in enumerate(ABILITY_HOTKEY_KEYS):
                                 if event.key == key and i < len(self.hotkey_abilities):
                                     self.select_move(self.hotkey_abilities[i])
+                                    ability_taken = True
                                     break
+                            if not ability_taken and self.selected_ability is None:
+                                awaiting = self.units_awaiting_turn.get(self.current_team, [])
+                                for i, key in enumerate(TARGET_HOTKEY_KEYS):
+                                    if (event.key == key
+                                            and i < len(awaiting)
+                                            and awaiting[i] is not self.current_unit):
+                                        self._begin_unit_turn(awaiting[i])
+                                        break
                     if event.type == MUSIC_END_EVENT:
                         if self._bgm_folder:
                             self.play_bgm(self._bgm_folder)
@@ -2317,6 +2525,12 @@ class GameGUI:
                             pygame.time.set_timer(NEXT_TURN_EVENT, 0)
                             self._complete_current_unit_turn()
                             self.next_turn()
+                    if event.type == TEAM_SWITCH_EVENT:
+                        if self.paused:
+                            pygame.time.set_timer(TEAM_SWITCH_EVENT, 200, loops=1)
+                        else:
+                            pygame.time.set_timer(TEAM_SWITCH_EVENT, 0)
+                            self._start_next_team_turn()
                     if event.type == pygame.MOUSEMOTION and self._dragging_slider:
                         self._apply_slider(self._dragging_slider, event.pos[0])
                     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:

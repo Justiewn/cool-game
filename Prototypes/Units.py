@@ -495,6 +495,10 @@ class Unit_Assassin(Unit):
     def __str__(self):
         return Unit_Assassin.className + " | " + self.name
 
+
+# new class: 
+
+
 class Unit_Thug(Unit):
 
     className = "Thug"

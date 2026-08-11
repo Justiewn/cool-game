@@ -35,6 +35,15 @@ def _has_effect(unit, status):
 def _stacks(unit, status):
     return unit.effect_stacks_dict.get(status, 0)
 
+def _min_turns_left(unit, status):
+    """Minimum turns_left across all live effects of `status` on `unit`.
+    Returns 0 when the status isn't active — callers should gate on _stacks first."""
+    matching = [e for e in unit.target_Ability_queue
+                if e.AttrValDict.get("EFFECT_STATUS") == status]
+    if not matching:
+        return 0
+    return min(e.turns_left for e in matching)
+
 def _mp_cost(name):
     return Ability.get_attr(name, "MP_COST") or 0
 
@@ -245,8 +254,11 @@ def _strategy_assassin(caster):
             target = min(kill_ready, key=lambda e: (getattr(type(e), "className", "") != "Priest", e.hp))
             return "Stab/Backstab", [target]
 
-    # 1. Shroud — only when caster is genuinely in trouble (HP<30) or MP-starved
-    if ((hp_low or mp_low) and _has_move(caster, "Shroud")
+    # 1. Shroud — only when caster is genuinely in trouble (HP<30) or MP-starved.
+    #    Never Shroud at full MP: the MP-regen benefit is wasted and stalling
+    #    delays killing the weakest enemy in the setup/finish cycle below.
+    if ((hp_low or mp_low) and caster.mp < caster.max_mp
+            and _has_move(caster, "Shroud")
             and _can_afford(caster, "Shroud") and not _has_effect(caster, "SHROUD")):
         return "Shroud", [caster]
 
@@ -307,8 +319,11 @@ def _strategy_assassin(caster):
                 return "Poison", [target]
         break  # can't afford current step — bail to stall/fallback rather than jump ahead
 
-    # 4. Everyone set up (or unhittable) — stall with Shroud while poison ticks work.
-    if (_has_move(caster, "Shroud") and _can_afford(caster, "Shroud")
+    # 4. Everyone set up (or unhittable) — stall with Shroud while poison ticks
+    #    work. Skip the stall at full MP: nothing to regen, so fall through to
+    #    Stab and keep the pressure on the weakest enemy.
+    if (caster.mp < caster.max_mp
+            and _has_move(caster, "Shroud") and _can_afford(caster, "Shroud")
             and not _has_effect(caster, "SHROUD")):
         return "Shroud", [caster]
 
@@ -363,21 +378,50 @@ def _strategy_thug(caster):
         if enemies and _has_move(caster, "Punch") and _can_afford(caster, "Punch"):
             return "Punch", [_damage_target(caster, "Punch", enemies)]
         return None, None
-    # 2. Riot if any ally isn't at cap (team ATK/CRIT buff)
+    # 2. Riot: build stacks while under cap, then only refresh when the buff
+    #    is about to lapse (turns_left == 1 → expires on the next caster turn,
+    #    since resolve_before_action decrements before the AI picks). Between
+    #    refreshes the AI falls through to Tackle/Punch instead of Riot-spamming.
     if allies and _has_move(caster, "Riot") and _can_afford(caster, "Riot"):
         cap = Ability.get_attr("Riot", "EFFECT_STACKS") or 5
         min_stacks = min(_stacks(a, "RIOT") for a in allies)
-        if min_stacks < cap:
+        lapse_soon = any(0 < _min_turns_left(a, "RIOT") <= 1 for a in allies)
+        if min_stacks < cap or lapse_soon:
             targets = _valid_targets(caster, "Riot")
             if targets:
                 return "Riot", targets
     # 2. Rest when hurt (Tackle costs HP; recover first)
     if _hp_ratio(caster) < 0.4:
         return "Rest", [caster]
-    # 3. Tackle: primary attack — higher damage + 25% stun, at HP cost
+    # 3a. Punch instead of Tackle when a min-roll Punch is a guaranteed KO.
+    #     Punch has no recoil, so save the HP cost when it isn't needed.
+    if enemies and _has_move(caster, "Punch") and _can_afford(caster, "Punch"):
+        pbase = Ability.get_attr("Punch", "DMG_BASE") or 0
+        proll = Ability.get_attr("Punch", "DMG_ROLL") or 0
+        finish = None
+        for e in sorted(enemies, key=lambda x: x.hp):
+            if caster.ATK + pbase - proll - e.DEF >= e.hp:
+                finish = e
+                break
+        if finish:
+            return "Punch", [finish]
+    # 3. Tackle: primary attack — higher damage + 20% stun, at HP cost.
+    #    Don't stack Tackle on an already-stunned enemy (they're skipping
+    #    their turn — spreading stuns to another target is worth more)
+    #    unless the tackle can KO them.
     if enemies and _has_move(caster, "Tackle") and _can_afford(caster, "Tackle"):
         target = _damage_target(caster, "Tackle", enemies)
         if target:
+            if _has_effect(target, "STUN"):
+                base = Ability.get_attr("Tackle", "DMG_BASE") or 0
+                roll = Ability.get_attr("Tackle", "DMG_ROLL") or 0
+                is_killshot = caster.ATK + base + roll - target.DEF >= target.hp
+                if not is_killshot:
+                    non_stunned = [e for e in enemies if not _has_effect(e, "STUN")]
+                    if non_stunned:
+                        alt = _damage_target(caster, "Tackle", non_stunned)
+                        if alt:
+                            target = alt
             return "Tackle", [target]
     # 4. Fallback punch
     if enemies and _has_move(caster, "Punch") and _can_afford(caster, "Punch"):

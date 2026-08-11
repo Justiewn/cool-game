@@ -116,7 +116,7 @@
       "EFFECT_STATUS": null,
       "EFFECT_TOOLTIP": null,
       "EFFECT_VALUES": null,
-      "TOOLTIP_INFO": "Charge at a target. 20% chance to stun for 1 turn. You take 12 damage.",
+      "TOOLTIP_INFO": "Charge at a target. 20% chance to stun for 1 turn. Deals damage to self.",
       "CAST_SOUND": "tackle.mp3",
       "HIT_TYPE": "BLUNT"
     },
@@ -135,7 +135,7 @@
       "HP_GAIN": 0,
       "MP_GAIN": 0,
       "IS_EFFECT": true,
-      "TICKS": 4,
+      "TICKS": 3,
       "EFFECT_TICKS_ON": 0,
       "EFFECT_TICK_OWNER": 1,
       "EFFECT_TICK_PHASE": 0,
@@ -154,7 +154,7 @@
         "CRIT": 3,
         "DODGE": 0
       },
-      "TOOLTIP_INFO": "Boost team's ATK and CRIT for several turns. Stacks 5 times",
+      "TOOLTIP_INFO": "Boost team's ATK and CRIT. Additional stacks refresh duration. Stacks 5 times. ",
       "CAST_SOUND": "riot.mp3",
       "HIT_TYPE": null
     },
@@ -386,7 +386,7 @@
         "DODGE": 0
       },
       "TOOLTIP_INFO": "Boost team's DEF briefly",
-      "CAST_SOUND": "uproar.mp3",
+      "CAST_SOUND": "bless.mp3",
       "HIT_TYPE": null
     },
     "Sword slash": {
@@ -834,7 +834,7 @@
       "HP_GAIN": 0,
       "MP_GAIN": 0,
       "IS_EFFECT": true,
-      "TICKS": 3,
+      "TICKS": 2,
       "EFFECT_TICKS_ON": 0,
       "EFFECT_TICK_OWNER": 1,
       "EFFECT_TICK_PHASE": 1,
@@ -847,15 +847,15 @@
       "EFFECT_VALUES": {
         "max_hp": 0,
         "max_mp": 0,
-        "ATK": 6,
+        "ATK": 5,
         "DEF": 0,
         "MAGIC": 0,
         "MAGIC_DEF": 0,
-        "CRIT": 8,
+        "CRIT": 5,
         "DODGE": 0
       },
       "TRIGGER_ON": "ALLY_DEATH",
-      "TOOLTIP_INFO": "Passive: when a teammate goes down, gain +6 ATK and +6 CRIT for 3 turns. Stacks.",
+      "TOOLTIP_INFO": "Passive: when a teammate goes down, gain +5 ATK and +5 CRIT. Stacks.",
       "CAST_SOUND": "uproar.mp3",
       "HIT_TYPE": null
     },
