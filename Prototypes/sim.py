@@ -8,7 +8,7 @@ Usage:
     python sim.py K,P,K A,A,A --runs 1000
     python sim.py K,K,K TH,TH,TH,TH,TH --runs 500 -v
 
-Class keys: T (Thug), K (Knight), P (Priest), TH (Thief), B (Berserker), A (Assassin)
+Class keys: T (Thug), K (Knight), P (Priestess), TH (Thief), B (Berserker), A (Assassin)
 """
 
 import argparse
@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from battle import Battle
 from Units import (
-    Unit, Unit_Knight, Unit_Priest, Unit_Thief,
+    Unit, Unit_Knight, Unit_Priestess, Unit_Thief,
     Unit_Berserker, Unit_Assassin, Unit_Thug,
 )
 from Abilities import Ability
@@ -33,7 +33,7 @@ import ai
 _CLASS_MAP = {
     'T':  Unit_Thug,
     'K':  Unit_Knight,
-    'P':  Unit_Priest,
+    'P':  Unit_Priestess,
     'TH': Unit_Thief,
     'B':  Unit_Berserker,
     'A':  Unit_Assassin,
@@ -53,7 +53,7 @@ _INCAP_STATUSES = {
 # ─────────────────────────────── helpers ────────────────────────────────
 
 def parse_team(spec):
-    """Parses 'K,P,K' into [Unit_Knight, Unit_Priest, Unit_Knight]."""
+    """Parses 'K,P,K' into [Unit_Knight, Unit_Priestess, Unit_Knight]."""
     classes = []
     for key in spec.split(','):
         key = key.strip().upper()
@@ -253,7 +253,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Example:\n"
                "  python sim.py K,P,K A,A,A --runs 1000\n"
-               "Class keys: T (Thug), K (Knight), P (Priest), TH (Thief), B (Berserker), A (Assassin)",
+               "Class keys: T (Thug), K (Knight), P (Priestess), TH (Thief), B (Berserker), A (Assassin)",
     )
     parser.add_argument("team0", help="Team 0 comp, comma-separated class keys")
     parser.add_argument("team1", help="Team 1 comp, comma-separated class keys")

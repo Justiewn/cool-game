@@ -58,6 +58,8 @@ class Battle:
                 target.target_Ability_queue.remove(effect)
             if effect_status:
                 target.modify_effect_stack_dict("remove", effect_status)
+            if effect_status == "STUN" and target.alive:
+                print("{} recovered from being stunned!".format(str(target)))
 
     def remove_target_effects(self, target):
         for effect in list(self.active_effects):

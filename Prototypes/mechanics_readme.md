@@ -6,7 +6,7 @@ State of the combat + effect systems. Companion to `abilities_readme.txt`
 ## Files
 - **`battle.py`** — `Battle` class: `active_effects` list + resolve/trigger methods.
 - **`Abilities.py`** — `Ability` class: per-cast object, JSON-driven attrs, per-ability "special" methods for custom mechanics.
-- **`Units.py`** — `Unit` base + `Unit_Knight/Priest/Thief/Berserker/Assassin/Thug` subclasses. Class-level team rosters (`team_zero_list`, `team_one_list`, etc.). `Unit.remove_all()` clears between battles.
+- **`Units.py`** — `Unit` base + `Unit_Knight/Priestess/Thief/Berserker/Assassin/Thug` subclasses. Class-level team rosters (`team_zero_list`, `team_one_list`, etc.). `Unit.remove_all()` clears between battles.
 - **`abilities.json`** — declarative ability data. See `abilities_readme.txt` for field docs.
 
 ## Turn model (team-turn, reworked mid-session)

@@ -29,7 +29,7 @@ LOG_BOX_MARGIN_BOTTOM = 80      # log sits well clear of the screen edge
 LOG_UNHOVERED_ALPHA = 55        # log fades when mouse isn't over it
 # Ability button fan (replaces the old vertical stack)
 ABILITY_FAN_RADIUS = 200        # distance from card anchor to the middle button
-ABILITY_FAN_SPREAD_DEG = 80     # total arc across all buttons (top → bottom)
+ABILITY_FAN_STEP_DEG = 18       # fixed angular gap between neighbouring fan buttons
 ABILITY_FAN_IN_DURATION = 0.25  # fan-out + fade-in from card anchor
 ABILITY_FAN_STATE_FADE = 0.2    # alpha lerp when selection state changes
 ABILITY_ALPHA_TARGETING = 100   # non-selected buttons dim to this while picking a target

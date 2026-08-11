@@ -366,7 +366,7 @@ class Unit:
 class Unit_Knight(Unit):
 
     className = "Knight"
-    name_pool = ["Aldric", "Roland", "Gareth", "Percival", "Baldwin", "Edmund", "Gawain", "Tristan"]
+    name_pool = ["Aldric", "Roland", "Gareth", "Percival", "Baldwin", "Edmund", "Gawain", "Tristan", "Lancelot", "Leofric", "Godfrey", "Eadric", "Osric", "Bertram", "Cedric"]
 
     def __init__(self, name, team):
         super().__init__(name, team)
@@ -377,10 +377,10 @@ class Unit_Knight(Unit):
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
         self.mp = 18                    #cannot surpass max_mp (stops at max in setter method)
 
-        self.ATK = 18
+        self.ATK = 23
         self.DEF = 8            # dmg - defense = final dmg
         self.MAGIC = 0
-        self.MAGIC_DEF = 0 
+        self.MAGIC_DEF = 0
         self.CRIT = 15          # /100%
         self.DODGE = 1          # /100%
         self.SPEED = 6         # max speed is 20
@@ -393,7 +393,7 @@ class Unit_Knight(Unit):
 class Unit_Thief(Unit):
 
     className = "Thief"
-    name_pool = ["Sly", "Jinx", "Nix", "Flick", "Pip", "Shadow", "Kip"]
+    name_pool = ["Sly", "Jinx", "Nix", "Flick", "Pip", "Shadow", "Kip", "Rook", "Vex", "Ziggy", "Trix", "Whisper", "Cinder", "Fable", "Glimmer"]
 
     def __init__(self, name, team):
         super().__init__(name, team)
@@ -403,7 +403,7 @@ class Unit_Thief(Unit):
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
         self.mp = 25                    #cannot surpass max_mp (stops at max in setter method)
 
-        self.ATK = 11
+        self.ATK = 16
         self.DEF = 3            # dmg - defense = final dmg
         self.MAGIC = 2
         self.MAGIC_DEF = 6 
@@ -416,10 +416,10 @@ class Unit_Thief(Unit):
     def __str__(self):
         return Unit_Thief.className + " | " + self.name
 
-class Unit_Priest(Unit):
+class Unit_Priestess(Unit):
 
-    className = "Priest"
-    name_pool = ["Ansel", "Caleb", "Dorian", "Elias", "Finn", "Gregory", "Hugh", "Isaiah"]
+    className = "Priestess"
+    name_pool = ["Miriam", "Seraphina", "Genevieve", "Beatrice", "Lucia", "Celeste", "Evangeline", "Isolde", "Selene", "Aurelia", "Ophelia", "Cecilia", "Rosalind", "Vivienne", "Arabella"]
 
     def __init__(self, name, team):
         super().__init__(name, team)
@@ -440,12 +440,12 @@ class Unit_Priest(Unit):
         self.movesList = ["Rest", "Smite", 'Heal', "Bless", 'Rejuvenation']
 
     def __str__(self):
-        return Unit_Priest.className + " | " + self.name
+        return Unit_Priestess.className + " | " + self.name
 
 class Unit_Berserker(Unit):
 
     className = "Berserker"
-    name_pool = ["Ragnar", "Bjorn", "Thorvald", "Ulf", "Gunnar", "Havar", "Sigurd", "Ivar"]
+    name_pool = ["Ragnar", "Bjorn", "Thorvald", "Ulf", "Gunnar", "Havar", "Sigurd", "Ivar", "Erik", "Leif", "Harald", "Sven", "Olaf", "Eirik", "Hakon", "Sten"]
 
     def __init__(self, name, team):
         super().__init__(name, team)
@@ -456,7 +456,7 @@ class Unit_Berserker(Unit):
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
         self.mp = 20                    #cannot surpass max_mp (stops at max in setter method)
 
-        self.ATK = 14
+        self.ATK = 17
         self.DEF = 5            # dmg - defense = final dmg
         self.MAGIC = 0
         self.MAGIC_DEF = 0 
@@ -472,7 +472,7 @@ class Unit_Berserker(Unit):
 class Unit_Assassin(Unit):
 
     className = "Assassin"
-    name_pool = ["Vex", "Cipher", "Dusk", "Wraith", "Null", "Shade", "Ghost", "Zephyr"]
+    name_pool = ["Vex", "Cipher", "Dusk", "Wraith", "Null", "Shade", "Ghost", "Zephyr", "Raven", "Nyx", "Eclipse", "Obsidian", "Phantom", "Specter", "Viper", "Onyx"]
 
     def __init__(self, name, team):
         super().__init__(name, team)
@@ -482,7 +482,7 @@ class Unit_Assassin(Unit):
         self.hp = 100                    #cannot surpass max_hp (stops at max in setter method)
         self.mp = 25                    #cannot surpass max_mp (stops at max in setter method)
 
-        self.ATK = 12
+        self.ATK = 15
         self.DEF = 2            # dmg - defense = final dmg
         self.MAGIC = 0
         self.MAGIC_DEF = 0 
@@ -502,7 +502,7 @@ class Unit_Assassin(Unit):
 class Unit_Thug(Unit):
 
     className = "Thug"
-    name_pool = ["Brutus", "Rex", "Knuckles", "Mack", "Biff", "Sledge", "Dirk", "Crank"]
+    name_pool = ["Brutus", "Rex", "Knuckles", "Mack", "Biff", "Sledge", "Dirk", "Crank", "Spike", "Rocco", "Vinnie", "Tony", "Sal", "Mickey", "Joey", "Frankie"]
     passives = ["Uproar"]
 
     def __init__(self, name, team):

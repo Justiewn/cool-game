@@ -18,7 +18,7 @@ is included for producing a standalone build.
 ## How it plays
 
 1. **Team select screen** — pick a scenario, compose two teams from six classes
-   (Knight, Priest, Thief, Berserker, Assassin, Thug), toggle Enemy AI on/off,
+   (Knight, Priestess, Thief, Berserker, Assassin, Thug), toggle Enemy AI on/off,
    START.
 2. **Battle screen** — team-turn model: on your team's turn, freely pick which
    awaiting unit acts next (click a card or press its digit hotkey), choose an
@@ -66,5 +66,5 @@ python Prototypes/sim.py K,P,K A,A,A --runs 500
 python Prototypes/sim.py K,K,K T,T,T,T,T --runs 500 --top-abilities 15
 ```
 
-Class keys: `K` Knight, `P` Priest, `TH` Thief, `B` Berserker, `A` Assassin, `T` Thug.
+Class keys: `K` Knight, `P` Priestess, `TH` Thief, `B` Berserker, `A` Assassin, `T` Thug.
 Reports win rate, average turns/rounds, and most-used abilities. ~2 ms/battle.

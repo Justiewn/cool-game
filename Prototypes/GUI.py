@@ -12,7 +12,7 @@ def _resource_path(relative):
     base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, relative)
 from battle import Battle
-from Units import Unit, Unit_Knight, Unit_Thief, Unit_Priest, Unit_Berserker, Unit_Assassin, Unit_Thug
+from Units import Unit, Unit_Knight, Unit_Thief, Unit_Priestess, Unit_Berserker, Unit_Assassin, Unit_Thug
 from Abilities import Ability
 
 # Pygame GUI for the turn-based battle prototype
@@ -74,7 +74,7 @@ ACTION_BTN_W = 210                 # ability button width
 ACTION_BTN_GAP = 10                # gap between card edge and action button column
 # Ability-button fan (replaces the old vertical stack)
 ABILITY_FAN_RADIUS = 200           # distance from card anchor to middle button
-ABILITY_FAN_SPREAD_DEG = 80        # total arc angle across all buttons (sized so a 5-unit column's top/bottom cards still keep their fan on-screen)
+ABILITY_FAN_STEP_DEG = 18          # angular gap between adjacent fan buttons (fixed step, so spacing stays constant regardless of how many abilities)
 ABILITY_FAN_IN_DURATION = 0.25     # fan-out + fade-in from card anchor
 ABILITY_FAN_STATE_FADE = 0.2       # alpha transition when selection state changes
 ABILITY_ALPHA_TARGETING = 100      # non-selected buttons dim while picking a target
@@ -125,7 +125,7 @@ def draw_text(surface, text, rect, font, color=BLACK, align="topleft"):
 
 
 class Button:
-    def __init__(self, rect, text, action=None, color=BUTTON_COLOR, hover_color=BUTTON_HOVER, tooltip="", right_text="", icon=None, left_text="", image_stacked=False, icon_left=False, label_font=None):
+    def __init__(self, rect, text, action=None, color=BUTTON_COLOR, hover_color=BUTTON_HOVER, tooltip="", right_text="", icon=None, left_text="", image_stacked=False, icon_left=False, label_font=None, hotkey_below=False):
         self.rect = pygame.Rect(rect)
         self.text = text
         self.action = action
@@ -142,6 +142,10 @@ class Button:
         # with the text to its right (used by the Enemy AI toggle).
         self.icon_left = icon_left
         self.label_font = label_font
+        # When True, the left_text hotkey renders as a small pill centred at
+        # the bottom of the button instead of as a left-side badge. Used by
+        # the standalone tall Rest button so the hotkey sits under the label.
+        self.hotkey_below = hotkey_below
         self.hover = False
 
     def draw(self, surface):
@@ -183,12 +187,21 @@ class Button:
             cost_rect = cost_surface.get_rect(midright=(self.rect.right - 10, self.rect.centery))
             surface.blit(cost_surface, cost_rect)
         if self.left_text:
-            # Hotkey pill: small dark badge with the key letter
-            pad = 8
+            # Hotkey pill: small dark badge with the key letter. Placed on the
+            # left by default, or centred at the bottom when hotkey_below is set.
             hk_surface = SMALL_FONT.render(self.left_text, True, WHITE)
             badge_w = hk_surface.get_width() + 10
             badge_h = hk_surface.get_height() + 4
-            badge_rect = pygame.Rect(self.rect.x + pad, self.rect.centery - badge_h // 2, badge_w, badge_h)
+            if self.hotkey_below:
+                pad_bottom = 8
+                badge_rect = pygame.Rect(
+                    self.rect.centerx - badge_w // 2,
+                    self.rect.bottom - badge_h - pad_bottom,
+                    badge_w, badge_h,
+                )
+            else:
+                pad = 8
+                badge_rect = pygame.Rect(self.rect.x + pad, self.rect.centery - badge_h // 2, badge_w, badge_h)
             pygame.draw.rect(surface, (30, 30, 30), badge_rect, border_radius=4)
             pygame.draw.rect(surface, WHITE, badge_rect, 1, border_radius=4)
             surface.blit(hk_surface, hk_surface.get_rect(center=badge_rect.center))
@@ -203,7 +216,7 @@ class Button:
 
 class GameGUI:
     CLASS_OPTIONS = ['T', 'P', 'K', 'TH', 'B', 'A']
-    CLASS_NAMES = {'T': 'Thug', 'P': 'Priest', 'K': 'Knight', 'TH': 'Thief', 'B': 'Berserker', 'A': 'Assassin'}
+    CLASS_NAMES = {'T': 'Thug', 'P': 'Priestess', 'K': 'Knight', 'TH': 'Thief', 'B': 'Berserker', 'A': 'Assassin'}
     SCENARIOS = [
         {"name": "Midnight Assassination", "player": ['A', 'A', 'A'], "enemy": ['K', 'K', 'K']},
         {"name": "Holy Crusade",           "player": ['K', 'P', 'K'], "enemy": ['B', 'B', 'B']},
@@ -272,6 +285,7 @@ class GameGUI:
         self.enemy_ai_enabled = True
         self.log_scroll = 0
         self.unit_portraits = self.load_unit_portraits()
+        self.dmg_type_icons = self._load_dmg_type_icons()
         self.scenario_images = {}
         self.scenario_images_fullscreen = {}
         self.scenario_preview_image = None
@@ -409,7 +423,7 @@ class GameGUI:
             "Thug": "thug.png",
             "Knight": "knight.png",
             "Thief": "thief.png",
-            "Priest": "priest.png",
+            "Priestess": "priestess.png",
             "Berserker": "berserker.png",
             "Assassin": "assassin.png",
         }
@@ -432,6 +446,26 @@ class GameGUI:
                 portraits[class_name] = fallback
                 self.unit_portraits_hires[class_name] = fallback
         return portraits
+
+    def _load_dmg_type_icons(self):
+        """Load the two damage-type SVGs used inline in ability tooltips.
+        Source SVGs are white glyph on solid black; we colorkey the black away
+        so the icon composites cleanly onto the tooltip background.
+        Returns {"NORMAL": Surface, "MAGIC": Surface} or {} on failure."""
+        icons_dir = _resource_path(os.path.join("images", "icons"))
+        target_size = FONT.get_linesize() - 2
+        mapping = {"NORMAL": "damage_type_physical.svg", "MAGIC": "damage_type_magic.svg"}
+        result = {}
+        for dmg_type, filename in mapping.items():
+            path = os.path.join(icons_dir, filename)
+            try:
+                raw = pygame.image.load(path)
+                icon = pygame.transform.smoothscale(raw, (target_size, target_size))
+                icon.set_colorkey((0, 0, 0))
+                result[dmg_type] = icon.convert_alpha()
+            except Exception:
+                pass
+        return result
 
     def play_bgm(self, folder):
         bgm_dir = _resource_path(os.path.join("sounds", "bgm", folder))
@@ -481,7 +515,7 @@ class GameGUI:
         Unit.remove_all()
         self.battle = Battle()
         Unit.player_name = "Hero"
-        _class_map = {'K': Unit_Knight, 'P': Unit_Priest, 'TH': Unit_Thief, 'B': Unit_Berserker, 'A': Unit_Assassin, 'T': Unit_Thug}
+        _class_map = {'K': Unit_Knight, 'P': Unit_Priestess, 'TH': Unit_Thief, 'B': Unit_Berserker, 'A': Unit_Assassin, 'T': Unit_Thug}
         _used_names = set()
 
         def pick_name(unit_cls):
@@ -1109,22 +1143,43 @@ class GameGUI:
 
         BTN_H = 38
         BTN_W = ACTION_BTN_W
+        # Rest sits as a standalone tall pill right next to the card, outside
+        # the fan. The other abilities fan out from beyond the Rest button so
+        # they don't overlap it. If a class doesn't have Rest, the fan anchors
+        # on the card edge as before.
+        REST_BTN_W = 54
+        REST_GAP_CARD = 24  # card edge → Rest button
+        REST_GAP_FAN = 2    # Rest button → fan anchor
 
         other_moves = [m for m in moves if m != "Rest"]
         has_rest = "Rest" in moves
-        # Rest nearest to card (= first), then other moves below
+        # Rest stays at index 0 so its hotkey remains Q; other moves take W…
         ordered = (["Rest"] + other_moves) if has_rest else other_moves
         self.hotkey_abilities = list(ordered)   # index → move name
-
-        # Fan layout: buttons arranged along an arc centred on the card's near
-        # edge (right edge for player, left for enemy). Middle button pokes
-        # out furthest; the ends tuck back toward the card, like a hand of cards.
         n = len(ordered)
-        anchor_x = card_x + card_w if is_player else card_x
+
+        # Rest button geometry (only if the unit has Rest).
+        rest_rect = None
+        if has_rest:
+            rest_h = max(BTN_H, int(card_h * 0.85))
+            if is_player:
+                rest_x = card_x + card_w + REST_GAP_CARD
+            else:
+                rest_x = card_x - REST_GAP_CARD - REST_BTN_W
+            rest_y = card_y + (card_h - rest_h) // 2
+            rest_rect = (rest_x, rest_y, REST_BTN_W, rest_h)
+
+        # Fan layout: buttons arranged along an arc centred on the outer edge
+        # of the Rest button (or the card's near edge when there's no Rest).
+        # Middle button pokes out furthest; the ends tuck back toward the anchor.
+        if has_rest:
+            anchor_x = (rest_x + REST_BTN_W + REST_GAP_FAN) if is_player \
+                       else (rest_x - REST_GAP_FAN)
+        else:
+            anchor_x = card_x + card_w if is_player else card_x
         anchor_y = card_y + card_h // 2
         spawn_t = time.time()
-        # All buttons start collapsed at the anchor (rect topleft such that the
-        # anchor lands on the button's centre) and fan out from there.
+        # Fan buttons start collapsed at the anchor and fan out from there.
         fan_origin_topleft = (anchor_x - BTN_W // 2, anchor_y - BTN_H // 2)
 
         for i, move in enumerate(ordered):
@@ -1133,27 +1188,40 @@ class GameGUI:
             tooltip = ""
             mp_cost = 0
             try:
-                tooltip = "\n".join(self.ability_tooltip_lines(move))
+                tooltip = "\n".join(self.ability_tooltip_lines(move, self.current_unit))
                 if move != "Rest":
                     mp_cost = Ability.get_attr(move, "MP_COST") or 0
             except Exception:
                 tooltip, mp_cost = "", 0
-            # Angle: −SPREAD/2 (top) to +SPREAD/2 (bottom), evenly spaced.
-            if n == 1:
-                angle_deg = 0.0
+            # Rest lives outside the fan — its rect was pre-computed above.
+            # Other abilities: angle -SPREAD/2 (top) to +SPREAD/2 (bottom),
+            # fan indices count from 0 skipping the Rest slot.
+            is_rest = has_rest and move == "Rest"
+            if is_rest:
+                rect = rest_rect
+                btn_x, btn_y = rest_rect[0], rest_rect[1]
+                origin_topleft = (btn_x, btn_y)  # no travel — fade only
             else:
-                angle_deg = -ABILITY_FAN_SPREAD_DEG / 2 + i * (ABILITY_FAN_SPREAD_DEG / (n - 1))
-            angle_rad = math.radians(angle_deg)
-            dx = ABILITY_FAN_RADIUS * math.cos(angle_rad)
-            dy = ABILITY_FAN_RADIUS * math.sin(angle_rad)
-            # Mirror the fan for enemy so it opens to the left instead of right.
-            if not is_player:
-                dx = -dx
-            cx = anchor_x + dx
-            cy = anchor_y + dy
-            btn_x = int(cx - BTN_W / 2)
-            btn_y = int(cy - BTN_H / 2)
-            rect = (btn_x, btn_y, BTN_W, BTN_H)
+                fan_i = i - (1 if has_rest else 0)
+                fan_n = n - (1 if has_rest else 0)
+                # Fixed angular step between neighbours — spacing stays the
+                # same whether the fan has 2 buttons or 6.
+                if fan_n <= 1:
+                    angle_deg = 0.0
+                else:
+                    angle_deg = -ABILITY_FAN_STEP_DEG * (fan_n - 1) / 2 + fan_i * ABILITY_FAN_STEP_DEG
+                angle_rad = math.radians(angle_deg)
+                dx = ABILITY_FAN_RADIUS * math.cos(angle_rad)
+                dy = ABILITY_FAN_RADIUS * math.sin(angle_rad)
+                # Mirror the fan for enemy so it opens to the left instead of right.
+                if not is_player:
+                    dx = -dx
+                cx = anchor_x + dx
+                cy = anchor_y + dy
+                btn_x = int(cx - BTN_W / 2)
+                btn_y = int(cy - BTN_H / 2)
+                rect = (btn_x, btn_y, BTN_W, BTN_H)
+                origin_topleft = fan_origin_topleft
             right_text = f"MP {mp_cost}" if move != "Rest" else ""
             left_text = ABILITY_HOTKEY_LABELS[i] if i < len(ABILITY_HOTKEY_LABELS) else ""
             not_enough_mp = move != "Rest" and mp_cost > self.current_unit.mp
@@ -1161,10 +1229,11 @@ class GameGUI:
             btn_hover = (110, 110, 110) if not_enough_mp else BUTTON_HOVER
             btn = Button(rect, move, make_action(), color=btn_color,
                          hover_color=btn_hover, tooltip=tooltip,
-                         right_text=right_text, left_text=left_text)
+                         right_text=right_text, left_text=left_text,
+                         hotkey_below=is_rest)
             # Animation bookkeeping consumed by draw_buttons.
             btn.fan_spawn_t = spawn_t
-            btn.fan_origin_topleft = fan_origin_topleft
+            btn.fan_origin_topleft = origin_topleft
             btn.fan_target_topleft = (btn_x, btn_y)
             # Target alpha starts at 255 (visible); animated alpha eases up from 0
             # over ABILITY_FAN_STATE_FADE via the fade-toward-target logic below.
@@ -1176,10 +1245,11 @@ class GameGUI:
     def select_move(self, move_name):
         if self.game_over:
             return
-        self.selected_ability = Ability(move_name, Ability.ability_ID_counter)
-        if self.selected_ability.AttrValDict["MP_COST"] > self.current_unit.mp:
+        mp_cost = Ability.get_attr(move_name, "MP_COST") or 0
+        if mp_cost > self.current_unit.mp:
             self.log(f"Not enough MP for {move_name}.")
             return
+        self.selected_ability = Ability(move_name, Ability.ability_ID_counter)
         available_targets = self.selected_ability.get_valid_targets(self.current_unit)
         if not available_targets:
             self.log(f"No valid targets for {move_name}.")
@@ -1570,7 +1640,7 @@ class GameGUI:
         (re.compile(r"-\d+\s*(?:ATK|DEF|CRIT|DODGE|MP|HP)\b"),                LOG_DEBUFF_COLOR, 1),
         (re.compile(r"\bis stunned\b"),                                       LOG_DEBUFF_COLOR, 1),
     ]
-    _LOG_CLASS_NAME_RE = re.compile(r"\b(?:Knight|Priest|Thief|Berserker|Assassin|Thug)\s*\|\s*[A-Za-z']+")
+    _LOG_CLASS_NAME_RE = re.compile(r"\b(?:Knight|Priestess|Thief|Berserker|Assassin|Thug)\s*\|\s*[A-Za-z']+")
 
     def _color_log_segments(self, line, unit_names):
         """Splits a log line into (text, colour) segments for coloured rendering.
@@ -1778,8 +1848,8 @@ class GameGUI:
     def draw_unit_tooltip(self, unit, mouse_pos):
         mods = self._get_stat_modifiers(unit)
         # (label, stat_attr) — stat_attr matches the keys used inside EFFECT_VALUES
-        left_stats  = [("ATK",    "ATK"),    ("MG ATK", "MAGIC"),     ("CRIT",  "CRIT")]
-        right_stats = [("DEF",    "DEF"),    ("MG DEF", "MAGIC_DEF"), ("DODGE", "DODGE")]
+        left_stats  = [("ATK",    "ATK"),    ("MATK", "MAGIC"),     ("CRIT",  "CRIT")]
+        right_stats = [("DEF",    "DEF"),    ("MDEF", "MAGIC_DEF"), ("DODGE", "DODGE")]
 
         def base_text(label, stat_attr):
             return f"{label}: {getattr(unit, stat_attr)}"
@@ -1824,7 +1894,7 @@ class GameGUI:
             draw_stat_line(rx, y, *left_stats[i])
             draw_stat_line(rx + col_left_w + col_gap, y, *right_stats[i])
 
-    def ability_tooltip_lines(self, ability_name):
+    def ability_tooltip_lines(self, ability_name, caster=None):
         lines = []
         try:
             attrs = Ability.AbilitiesDict.get(ability_name, {})
@@ -1835,14 +1905,25 @@ class GameGUI:
             if dmg_type:
                 dmg_base = attrs.get("DMG_BASE", 0)
                 dmg_roll = attrs.get("DMG_ROLL", 0)
-                hit_type = attrs.get("HIT_TYPE")
                 if dmg_type == "MAGIC":
-                    base_str = "MAGIC"
+                    base_str = "MATK"
+                    stat_val = getattr(caster, "MAGIC", None) if caster else None
                 else:
                     base_str = f"ATK+{dmg_base}" if dmg_base else "ATK"
-                roll_str = f"(\u00b1{dmg_roll})" if dmg_roll else ""
-                hit_str = f" [{hit_type}]" if hit_type else ""
-                lines.append(f"DMG: {base_str}{roll_str}{hit_str}")
+                    stat_val = getattr(caster, "ATK", None) if caster else None
+                roll_str = f"\u00b1{dmg_roll}" if dmg_roll else ""
+                # Sentinel: the tooltip renderer swaps this token for an
+                # inline SVG icon (physical sword / magic sparkles). Kept as
+                # a token so the tooltip stays a plain "\n"-joined string.
+                type_token = f" \x01{dmg_type}\x01"
+                # Range preview based on caster's current stat + DMG_BASE \u00b1 DMG_ROLL,
+                # pre-DEF/crit \u2014 matches what damage rolls before defence.
+                range_str = ""
+                if stat_val is not None:
+                    lo = max(0, stat_val + dmg_base - dmg_roll)
+                    hi = stat_val + dmg_base + dmg_roll
+                    range_str = f"{lo}-{hi}" if lo != hi else f" {hi}"
+                lines.append(f"DMG: {type_token}{range_str} ({base_str}{roll_str})")
             hp_gain = attrs.get("HP_GAIN", 0)
             if attrs.get("IS_HEAL") and hp_gain:
                 lines.append(f"Heal: {hp_gain} HP")
@@ -1888,8 +1969,24 @@ class GameGUI:
         tooltip_lines = tooltip.splitlines() if tooltip else [tooltip]
         padding = 8
         line_height = FONT.get_linesize()
-        width = max(FONT.size(line)[0] for line in tooltip_lines) + padding * 2
-        height = line_height * len(tooltip_lines) + padding * 2
+        # Split each line into (text, dmg_type_icon_or_None). The DMG line
+        # carries a "\x01<TYPE>\x01" sentinel that we replace with an inline icon.
+        icon_re = re.compile(r"\x01([A-Z]+)\x01")
+        parsed = []
+        for line in tooltip_lines:
+            m = icon_re.search(line)
+            if m and m.group(1) in self.dmg_type_icons:
+                parsed.append((line[:m.start()] + line[m.end():], self.dmg_type_icons[m.group(1)]))
+            else:
+                parsed.append((line.replace("\x01", ""), None))
+        icon_gap = 4
+        def line_width(text, icon):
+            w = FONT.size(text)[0]
+            if icon is not None:
+                w += icon_gap + icon.get_width()
+            return w
+        width = max(line_width(t, i) for t, i in parsed) + padding * 2
+        height = line_height * len(parsed) + padding * 2
         tooltip_rect = pygame.Rect(mouse_pos[0] + 16, mouse_pos[1] + 16, width, height)
         if tooltip_rect.right > WIDTH:
             tooltip_rect.right = WIDTH - 10
@@ -1897,9 +1994,14 @@ class GameGUI:
             tooltip_rect.bottom = self.screen.get_height() - 10
         pygame.draw.rect(self.screen, LIGHT_GRAY, tooltip_rect, border_radius=6)
         pygame.draw.rect(self.screen, BLACK, tooltip_rect, 2, border_radius=6)
-        for i, line in enumerate(tooltip_lines):
-            text_surface = FONT.render(line, True, BLACK)
-            self.screen.blit(text_surface, (tooltip_rect.x + padding, tooltip_rect.y + padding + i * line_height))
+        for i, (text, icon) in enumerate(parsed):
+            y = tooltip_rect.y + padding + i * line_height
+            text_surface = FONT.render(text, True, BLACK)
+            self.screen.blit(text_surface, (tooltip_rect.x + padding, y))
+            if icon is not None:
+                icon_x = tooltip_rect.x + padding + text_surface.get_width() + icon_gap
+                icon_y = y + (line_height - icon.get_height()) // 2
+                self.screen.blit(icon, (icon_x, icon_y))
 
     def draw_selection_screen(self):
         self.screen.fill(TRUE_BLACK)
@@ -2240,16 +2342,25 @@ class GameGUI:
                 cx = card_rect.left - base_r - 6
             cy = card_rect.centery
             glow_size = (base_r + 12) * 2
-            glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
-            center = (glow_size // 2, glow_size // 2)
+            # Supersample: render circles at 3x size then smoothscale down so
+            # the rims antialias. pygame.draw.circle has no AA on its own —
+            # without this the halo, the fill edge, and the 2px white ring
+            # all step visibly (worse when the pulse animates the radius).
+            SS = 3
+            ss_size = glow_size * SS
+            glow_surf = pygame.Surface((ss_size, ss_size), pygame.SRCALPHA)
+            center = (ss_size // 2, ss_size // 2)
             outer_alpha = int(60 + pulse * 90)
             inner_alpha = int(180 + pulse * 75)
             r_col, g_col, b_col = badge_color
-            pygame.draw.circle(glow_surf, (r_col, g_col, b_col, outer_alpha), center, r + 8)
-            pygame.draw.circle(glow_surf, (r_col, g_col, b_col, inner_alpha), center, r)
-            pygame.draw.circle(glow_surf, (255, 255, 255, 220), center, r, 2)
+            pygame.draw.circle(glow_surf, (r_col, g_col, b_col, outer_alpha), center, (r + 8) * SS)
+            pygame.draw.circle(glow_surf, (r_col, g_col, b_col, inner_alpha), center, r * SS)
+            pygame.draw.circle(glow_surf, (255, 255, 255, 220), center, r * SS, 2 * SS)
+            glow_surf = pygame.transform.smoothscale(glow_surf, (glow_size, glow_size))
+            # Digit is rendered at native size — text is already AA'd by SDL_ttf,
+            # supersampling it just makes it soft. Blit on top of the scaled glow.
             digit_surf = TITLE_FONT.render(digit, True, BLACK)
-            glow_surf.blit(digit_surf, digit_surf.get_rect(center=center))
+            glow_surf.blit(digit_surf, digit_surf.get_rect(center=(glow_size // 2, glow_size // 2)))
             self.screen.blit(glow_surf, (cx - glow_size // 2, cy - glow_size // 2))
 
     def draw_battle_screen(self):

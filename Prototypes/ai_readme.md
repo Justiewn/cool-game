@@ -37,7 +37,7 @@ result off to the existing cast pipeline.
 - **Target scorers**:
   - `_threat_score(u) = 2·ATK + 2·MAGIC + CRIT`
   - `_lowest_hp`, `_highest_threat`, `_priests`, `_priority_target`
-  - `_damage_target(caster, name, enemies)` — kill-shot check first (max roll can outright kill, lowest-HP first), else `_priority_target` (lowest-HP alive Priest if any, else highest threat).
+  - `_damage_target(caster, name, enemies)` — kill-shot check first (max roll can outright kill, lowest-HP first), else `_priority_target` (lowest-HP alive Priestess if any, else highest threat).
 - **`_fallback`** — random legal move; used when a class has no strategy or every priority is unaffordable.
 
 ## Target scoring
@@ -45,12 +45,12 @@ result off to the existing cast pipeline.
 `_damage_target(caster, name, enemies)` returns:
 1. an enemy the ability's **maximum roll** can outright kill, lowest HP first
    (guarantees the kill is at least possible on a lucky roll);
-2. otherwise `_priority_target(enemies)` — the lowest-HP alive Priest (heal-blocker
+2. otherwise `_priority_target(enemies)` — the lowest-HP alive Priestess (heal-blocker
    priority), else the highest-`_threat_score` unit.
 
 Buff/debuff strategies pick their own targets directly (biggest threat for
 debuffs, self for self-buffs, whole team for team buffs). Berserker's Taunt
-selection and Assassin's DEF-sorted targeting also use Priest-first tie-breaking.
+selection and Assassin's DEF-sorted targeting also use Priestess-first tie-breaking.
 
 ## Current strategies
 
@@ -58,21 +58,21 @@ Priorities are checked top-down; the first that fires wins.
 
 | Class     | 1                              | 2                                       | 3                             | 4                                    | 5                    |
 |-----------|--------------------------------|-----------------------------------------|-------------------------------|--------------------------------------|----------------------|
-| Priest    | Heal wounded (<40% HP)         | Rejuvenation if team avg < 70%          | Bless if no ally has it       | Smite the highest-threat / kill-shot | —                    |
+| Priestess    | Heal wounded (<40% HP)         | Rejuvenation if team avg < 70%          | Bless if no ally has it       | Smite the highest-threat / kill-shot | —                    |
 | Knight    | Sword slash for a guaranteed KO | If HP<10, only Sword slash             | Sharpen sword if not SHRPN    | Raise shield if lowest-HP ally & HP<40 | Default Sword slash  |
 | Berserker | If HP<10, only Cleave          | Frenzy if not FRENZY                    | Taunt biggest untaunted threat | Cleave (always, if any enemy)        | —                    |
-| Assassin  | Guaranteed Stab kill (crit + MARKED backstab bonus) | Shroud if (HP<30 or MP<40%) AND `mp < max_mp` | Priest priority: Mark then Stab, focus one at a time | Setup cycle: Mark → Poison→cap, squishiness order | Shroud stall (gated on `mp < max_mp`), then fallback Stab |
+| Assassin  | Guaranteed Stab kill (crit + MARKED backstab bonus) | Shroud if (HP<30 or MP<40%) AND `mp < max_mp` | Priestess priority: Mark then Stab, focus one at a time | Setup cycle: Mark → Poison→cap, squishiness order | Shroud stall (gated on `mp < max_mp`), then fallback Stab |
 | Thief     | Sneak if not SNEAK             | Distract the tankiest enemy             | Shiv a distracted / kill-shot | —                                    | —                    |
 | Thug      | If HP<10, only Punch (no recoil) | Riot until team at cap, then refresh only when `turns_left <= 1` | Rest if HP<40% | Min-Punch KO → Punch, else Tackle (avoid stunned targets unless KO) | Punch fallback |
 
 ### Per-class detail
 
 **Assassin** — the most-iterated class:
-1. **Guaranteed kill**: any enemy `_stab_max(e) >= e.hp` gets Stabbed. Uses caster ATK + Stab DMG_BASE+ROLL, applies 1.5× crit multiplier as upper bound, adds the MARKED backstab bonus (`floor((max_hp - hp) * 0.2)`) for marked targets. Prefer Priest, then lowest HP.
+1. **Guaranteed kill**: any enemy `_stab_max(e) >= e.hp` gets Stabbed. Uses caster ATK + Stab DMG_BASE+ROLL, applies 1.5× crit multiplier as upper bound, adds the MARKED backstab bonus (`floor((max_hp - hp) * 0.2)`) for marked targets. Prefer Priestess, then lowest HP.
 2. **Shroud** — only if `caster.hp < 30` or `mp < 40% max`, AND `caster.mp < caster.max_mp` (never Shroud at full MP — regen benefit is wasted and it stalls the kill loop).
-3. **Priest priority**: if any priest is MARKED, Stab that priest; else Mark the lowest-HP unmarked priest. Never mark a second priest while one is marked.
-4. **Setup cycle**: for non-Priest enemies in `sorted(key=e.DEF)` (squishiest first), skip if `hp_ratio <= 0.5` (finisher handles), Mark if unmarked, else Poison to `EFFECT_STACKS` cap. Bails to fallback if it can't afford the current step (doesn't jump ahead).
-5. **Shroud stall** (also gated on `mp < max_mp`), then **fallback Stab** (Marked preferred, Priest first on ties by DEF). At full MP the stall is skipped so the AI falls straight to Stab.
+3. **Priestess priority**: if any priest is MARKED, Stab that priest; else Mark the lowest-HP unmarked priest. Never mark a second priest while one is marked.
+4. **Setup cycle**: for non-Priestess enemies in `sorted(key=e.DEF)` (squishiest first), skip if `hp_ratio <= 0.5` (finisher handles), Mark if unmarked, else Poison to `EFFECT_STACKS` cap. Bails to fallback if it can't afford the current step (doesn't jump ahead).
+5. **Shroud stall** (also gated on `mp < max_mp`), then **fallback Stab** (Marked preferred, Priestess first on ties by DEF). At full MP the stall is skipped so the AI falls straight to Stab.
 
 **Knight**:
 1. Sword slash for a guaranteed KO (max roll can kill).
@@ -88,7 +88,7 @@ Priorities are checked top-down; the first that fires wins.
 4. Cleave (team-wide damage).
 5. Cleave fallback.
 
-**Thief**: Sneak → Distract (once per target, doesn't stack) → Shiv the focus target. Focus target = squishiest (lowest DEF), Priest first on ties.
+**Thief**: Sneak → Distract (once per target, doesn't stack) → Shiv the focus target. Focus target = squishiest (lowest DEF), Priestess first on ties.
 
 **Thug** — desperate HP<10 → only Punch (no recoil). Otherwise:
 1. **Riot maintenance**: cast until every ally hits `EFFECT_STACKS` cap, then refresh only when `_min_turns_left(ally, "RIOT") <= 1` (i.e. would expire on the next caster turn after `resolve_before_action` decrements). Without this the AI Riot-spammed every turn instead of attacking; without a cap check, letting the buff lapse dropped every stack on every ally simultaneously (they share `turns_left` via `EFFECT_STACK_RENEWS`).
@@ -97,7 +97,7 @@ Priorities are checked top-down; the first that fires wins.
 4. **Tackle** via `_damage_target`, but if the picked target is `STUN`'d and it's *not* a killshot (`caster.ATK + Tackle.DMG_BASE + Tackle.DMG_ROLL - target.DEF >= target.hp` computed inline), re-pick from the non-stunned pool — spreading a new stun is worth more than doubling up.
 5. **Punch fallback**.
 
-**Priest**: emergency Heal (single wounded ally <40%) → Rejuvenation (team-wide when avg HP <70%) → Bless upkeep → Smite via `_damage_target` (which prefers enemy Priest).
+**Priestess**: emergency Heal (single wounded ally <40%) → Rejuvenation (team-wide when avg HP <70%) → Bless upkeep → Smite via `_damage_target` (which prefers enemy Priestess).
 
 ## Simulator (`sim.py`)
 
@@ -144,7 +144,7 @@ Worth doing next `sim.py` exercise.
 ## What's intentionally not here
 
 - **No lookahead / simulation.** Each unit picks locally best; no "if I do X, the priest will heal, then I can Y."
-- **No teamwork coordination.** Two Priests may both cast Heal on the same wounded ally in sequence. In practice this over-heals rather than misses.
+- **No teamwork coordination.** Two Priestessesses may both cast Heal on the same wounded ally in sequence. In practice this over-heals rather than misses.
 - **No positioning / range** — the game is targeting-only, so nothing to model.
 - **Hand-tuned thresholds.** `<40% HP`, `<55%`, `<70%` are all baked into the strategy functions rather than a config dict.
 - **No difficulty tiers.** All enemies play at "smart" level.
@@ -160,9 +160,9 @@ Ordered by effort / return.
 2. **Pull thresholds into a config.** Move the `< 0.4`, `< 0.55`, `< 0.7`
    numbers into a per-class dict at the top of the file so tuning doesn't
    require reading each strategy body.
-3. **Team-aware Priest.** Track which allies are already scheduled to receive
+3. **Team-aware Priestess.** Track which allies are already scheduled to receive
    a heal this turn (add a per-turn scratch dict) so multiple healers don't
-   pile on the same target. Applies more once there's more than one Priest.
+   pile on the same target. Applies more once there's more than one Priestess.
 4. **Effect-source awareness.** Prefer the strongest available caster for
    team buffs — e.g. if two Thugs can cast Riot this round, only the one
    with the highest ATK should, so stacks don't cap prematurely.
@@ -208,7 +208,7 @@ until `battle.is_battle_over()`.
 
 ## When to extend
 
-If a strategy misfires on an obvious case (e.g. Priest smites while an ally
+If a strategy misfires on an obvious case (e.g. Priestess smites while an ally
 is at 5 HP), add a priority *above* the offending one rather than adjusting
 the affected step — priorities read as a decision tree, not a mesh.
 

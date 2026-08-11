@@ -78,12 +78,12 @@ def _highest_threat(units):
 
 
 def _priests(units):
-    """Filter for Priest-class units — targets the AI wants to focus down first
-    because Priests heal enemy teammates and reset our damage progress."""
-    return [u for u in units if getattr(type(u), "className", "") == "Priest"]
+    """Filter for Priestess-class units — targets the AI wants to focus down first
+    because Priestessesses heal enemy teammates and reset our damage progress."""
+    return [u for u in units if getattr(type(u), "className", "") == "Priestess"]
 
 def _priority_target(enemies):
-    """Preferred non-kill-shot target: Priest first (lowest-HP among them if
+    """Preferred non-kill-shot target: Priestess first (lowest-HP among them if
     multiple), else the highest-threat enemy overall."""
     if not enemies:
         return None
@@ -96,7 +96,7 @@ def _priority_target(enemies):
 def _damage_target(caster, name, enemies):
     """Preferred target for a damage move:
        1. an enemy the max roll can outright kill (lowest-HP first);
-       2. otherwise a Priest if any is alive (focus the healer down first);
+       2. otherwise a Priestess if any is alive (focus the healer down first);
        3. otherwise the highest-threat enemy in range."""
     if not enemies:
         return None
@@ -236,7 +236,7 @@ def _strategy_assassin(caster):
     # 0. Guaranteed kill: any enemy that Stab/Backstab can drop this turn (with
     #    or without MARK) gets stabbed NOW — that's the highest priority.
     #    Assumes max damage roll + crit multiplier; adds the missing-HP backstab
-    #    bonus for MARKED targets. Prefer Priest, then lowest HP.
+    #    bonus for MARKED targets. Prefer Priestess, then lowest HP.
     if _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
         base = Ability.get_attr("Stab/Backstab", "DMG_BASE") or 0
         roll = Ability.get_attr("Stab/Backstab", "DMG_ROLL") or 0
@@ -251,7 +251,7 @@ def _strategy_assassin(caster):
             return best
         kill_ready = [e for e in enemies if _stab_max(e) >= e.hp]
         if kill_ready:
-            target = min(kill_ready, key=lambda e: (getattr(type(e), "className", "") != "Priest", e.hp))
+            target = min(kill_ready, key=lambda e: (getattr(type(e), "className", "") != "Priestess", e.hp))
             return "Stab/Backstab", [target]
 
     # 1. Shroud — only when caster is genuinely in trouble (HP<30) or MP-starved.
@@ -264,7 +264,7 @@ def _strategy_assassin(caster):
 
     # 2. Finisher — any enemy at or below 50% HP.
     #    Among the wounded, prefer a MARKED one; else pick the squishiest (lowest DEF).
-    #    On ties, prefer the Priest (heal-blocker priority).
+    #    On ties, prefer the Priestess (heal-blocker priority).
     #    If the chosen target isn't Marked yet → Mark first, so the backstab bonus lands.
     #    Otherwise Stab/Backstab it.
     weak = [e for e in enemies if _hp_ratio(e) <= 0.5]
@@ -272,7 +272,7 @@ def _strategy_assassin(caster):
         marked_weak = [e for e in weak if _has_effect(e, "MARKED")]
         pool = marked_weak or weak
         # (is_not_priest, DEF) → priests sort first; then by increasing DEF
-        target = min(pool, key=lambda e: (getattr(type(e), "className", "") != "Priest", e.DEF))
+        target = min(pool, key=lambda e: (getattr(type(e), "className", "") != "Priestess", e.DEF))
         if not _has_effect(target, "MARKED"):
             if _has_move(caster, "Mark") and _can_afford(caster, "Mark"):
                 return "Mark", [target]
@@ -280,8 +280,8 @@ def _strategy_assassin(caster):
             if _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
                 return "Stab/Backstab", [target]
 
-    # 3. Priest priority — Mark then Stab, skip Poison entirely.
-    #    Priests can undo poison ticks via Heal, so drain them directly with
+    # 3. Priestess priority — Mark then Stab, skip Poison entirely.
+    #    Priestessesses can undo poison ticks via Heal, so drain them directly with
     #    Stab/Backstab (bonus damage scales with their missing HP anyway).
     #    If any priest is already MARKED, Stab that one — never Mark a second
     #    priest while one is still marked (focus one target at a time).
@@ -297,11 +297,11 @@ def _strategy_assassin(caster):
             if _has_move(caster, "Mark") and _can_afford(caster, "Mark"):
                 return "Mark", [target]
 
-    # 4. Setup cycle for non-Priest enemies. Squishiness order (lowest DEF first).
+    # 4. Setup cycle for non-Priestess enemies. Squishiness order (lowest DEF first).
     #    A target is "set up" if MARKED and at Poison cap; fully-set-up healthy
     #    targets get skipped so focus moves to the next in order.
     for target in sorted(enemies, key=lambda e: e.DEF):
-        if getattr(type(target), "className", "") == "Priest":
+        if getattr(type(target), "className", "") == "Priestess":
             continue  # handled by branch 3
         # Below-50% targets are handled by branch 2 above; only apply setup to healthy ones.
         if _hp_ratio(target) <= 0.5:
@@ -327,18 +327,18 @@ def _strategy_assassin(caster):
             and not _has_effect(caster, "SHROUD")):
         return "Shroud", [caster]
 
-    # 5. Last resort — Stab whoever's softest, preferring Marked, Priest first on ties.
+    # 5. Last resort — Stab whoever's softest, preferring Marked, Priestess first on ties.
     if _has_move(caster, "Stab/Backstab") and _can_afford(caster, "Stab/Backstab"):
         marked = [e for e in enemies if _has_effect(e, "MARKED")]
         pool = marked or enemies
-        target = min(pool, key=lambda e: (getattr(type(e), "className", "") != "Priest", e.DEF))
+        target = min(pool, key=lambda e: (getattr(type(e), "className", "") != "Priestess", e.DEF))
         return "Stab/Backstab", [target]
 
     return None, None
 
 
 def _strategy_thief(caster):
-    """Focus one target at a time: the squishiest enemy (lowest DEF), Priest
+    """Focus one target at a time: the squishiest enemy (lowest DEF), Priestess
     first if any alive. Sneak → Distract → Shiv, then keep Shivving until the
     focus dies, then pick the next squishiest. Distract doesn't stack, so only
     one Thief needs to apply it per target."""
@@ -346,10 +346,10 @@ def _strategy_thief(caster):
     if not enemies:
         return None, None
 
-    # Focus target: Priest first, then squishiest (lowest DEF), HP as tiebreaker
+    # Focus target: Priestess first, then squishiest (lowest DEF), HP as tiebreaker
     focus = min(
         enemies,
-        key=lambda e: (getattr(type(e), "className", "") != "Priest", e.DEF, e.hp),
+        key=lambda e: (getattr(type(e), "className", "") != "Priestess", e.DEF, e.hp),
     )
 
     # 1. Sneak self-buff first — big CRIT / DODGE for the incoming Shivs
@@ -432,7 +432,7 @@ def _strategy_thug(caster):
 # ─────────────────────────────── dispatch ───────────────────────────────
 
 _STRATEGIES = {
-    "Priest":    _strategy_priest,
+    "Priestess":    _strategy_priest,
     "Knight":    _strategy_knight,
     "Berserker": _strategy_berserker,
     "Assassin":  _strategy_assassin,
