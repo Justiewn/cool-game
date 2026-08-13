@@ -51,6 +51,12 @@ class Unit:
         self.PSN_dmg = 0
         self.PSN_count = 0
 
+        # PRD counters — per-attempt "attempts since last success" for each
+        # variance-compressed proc. See prd.py. Buffs/debuffs on CRIT/DODGE
+        # rescale the ramp naturally because prd.roll re-reads the current
+        # stat every call.
+        self._prd_counters = {"CRIT": 0, "DODGE": 0}
+
         if self.team == 0:
             Unit.team_zero_list.append(self)
             Unit.team_zero_alive_list.append(self)
@@ -510,3 +516,47 @@ class Unit_Thug(Unit):
 
     def __str__(self):
         return Unit_Thug.className + " | " + self.name
+
+
+class Unit_Spellblade(Unit):
+    """Melee mage. Combines physical and arcane damage; sustains via MP."""
+
+    className = "Spellblade"
+    name_pool = ["Elyria", "Kael", "Sylas", "Morgan", "Rhys", "Ilya", "Cassian", "Nyx"]
+
+    def __init__(self, name, team):
+        super().__init__(name, team)
+        self._max_hp = 95
+        self.hp = 95
+        self._max_mp = 25
+        self.mp = 25
+        self._ATK = 11
+        self._DEF = 4
+        self.MAGIC = 8
+        self.MAGIC_DEF = 6
+        self._CRIT = 6
+        self._DODGE = 5
+        self.movesList = ["Rest", "Arcane Strike", "Mana Sap", "Arcane Shield"]
+
+    def __str__(self):
+        return Unit_Spellblade.className + " | " + self.name
+
+
+class Unit_Hunter(Unit):
+    """Ranged skirmisher."""
+
+    className = "Hunter"
+    name_pool = ["Artemis", "Rowan", "Ash", "Cedar", "Fenn", "Kestrel", "Wren", "Vale"]
+
+    def __init__(self, name, team):
+        super().__init__(name, team)
+        self._max_hp = 100
+        self.hp = 100
+        self._ATK = 17
+        self._DEF = 3
+        self._CRIT = 10
+        self._DODGE = 8
+        self.movesList = ["Rest", "Arrow", "Lay Trap", "Focus"]
+
+    def __str__(self):
+        return Unit_Hunter.className + " | " + self.name

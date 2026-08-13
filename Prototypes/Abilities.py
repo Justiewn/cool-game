@@ -11,6 +11,7 @@ import json
 import os
 import sys
 from Units import Unit
+import prd
 
 
 def _resource_path(relative):
@@ -69,13 +70,30 @@ class Ability():
         elif dmg_type == "MAGIC":
             damage_message = "magic"
             blocked_message = "their magic defence is too strong!"
+        # Arcane Shield: 50% of incoming damage is absorbed by MP first.
+        # If MP runs out, remainder spills to HP normally.
+        shield_absorbed_any = False
+        if final_damage > 0 and "ARCSHLD" in target.effect_stacks_dict:
+            reduced = max(1, final_damage // 2)
+            absorbed = min(target.mp, reduced)
+            target.mp -= absorbed
+            overflow = reduced - absorbed
+            if absorbed > 0:
+                shield_absorbed_any = True
+                print("{}'s Arcane Shield absorbs {} damage (MP -{}).".format(
+                    str(target), absorbed, absorbed))
+                cls._combat_events.append(
+                    {"kind": "mp_absorbed", "target": target, "amount": absorbed})
+            final_damage = overflow  # any leftover falls through to HP
         if final_damage > 0:                                #if there is damage,
             target.hp -= final_damage                             #target loses HP
             if is_crit:
                 print("Critical hit! {} took {} {} damage!".format(str(target), final_damage, damage_message))
             else:
                 print("{} took {} {} damage!".format(str(target), final_damage, damage_message))
-        else:
+        elif not shield_absorbed_any:
+            # Only genuine defensive blocks (DEF/MAGIC_DEF ate it) show BLOCKED —
+            # a shield-eaten hit is its own thing (purple MP splash above).
             print("{} took no damage... {}".format(str(target), blocked_message))
             cls._combat_events.append({"kind": "blocked", "target": target})
 
@@ -210,7 +228,7 @@ class Ability():
             if success is None and dmg_type in ["NORMAL", "MAGIC"]:
                 raw_damage = self.calculate_dmg(caster, dmg_type)
                 final_damage = self.calculate_def(raw_damage, target, dmg_type)
-                is_crit = random.random() < caster.CRIT / 100
+                is_crit = prd.roll(caster, "CRIT", caster.CRIT)
                 if is_crit and final_damage > 0:
                     final_damage = math.ceil(final_damage * 1.5)
                 Ability.damage_target(final_damage, target, dmg_type, is_crit)
@@ -254,7 +272,7 @@ class Ability():
             return False
         if self.AttrValDict["CAN_DODGE"]:
             #print("Dodge is: {}".format(target.DODGE))                                 #for debugging
-            if random.random() < target.DODGE/100:
+            if prd.roll(target, "DODGE", target.DODGE):
                 print("{} dodged the attack!".format(str(target)))
                 Ability._combat_events.append({"kind": "dodged", "target": target})
                 return True
@@ -443,7 +461,7 @@ class Ability():
         # pre-DEF damage roll, and rolls 20% to apply a 1-turn Stun.
         raw_damage = self.calculate_dmg(caster, "NORMAL")
         final_damage = self.calculate_def(raw_damage, target, "NORMAL")
-        is_crit = random.random() < caster.CRIT / 100
+        is_crit = prd.roll(caster, "CRIT", caster.CRIT)
         if is_crit and final_damage > 0:
             final_damage = math.ceil(final_damage * 1.5)
         Ability.damage_target(final_damage, target, "NORMAL", is_crit)
@@ -456,8 +474,9 @@ class Ability():
         caster.hp -= recoil
         print("{} takes {} recoil damage from the tackle!".format(str(caster), recoil))
 
-        # Stun chance — only meaningful if target still standing
-        if target.hp > 0 and random.random() < 0.20:
+        # Stun chance — only meaningful if target still standing. PRD'd on
+        # the caster so a Thug can't string three stuns nor whiff ten in a row.
+        if target.hp > 0 and prd.roll(caster, "STUN_TACKLE", 20):
             battle = getattr(self, 'battle', None)
             if battle is not None:
                 stun = Ability("Stun", Ability.ability_ID_counter)
@@ -473,6 +492,44 @@ class Ability():
         # (Tackle already applied damage above). Same pattern as StabBackstab.
         return True
 
+    def ArcaneStrike(self, target, caster):
+        """Combined physical + magic hit. Damage = (ATK + MAGIC) + roll,
+        with physical defence and magic defence both subtracted from
+        their respective halves. Crit multiplies the combined final.
+        Displayed as MAGIC damage so the magic hit-sound tier fires."""
+        roll = randint(-self.AttrValDict["DMG_ROLL"], self.AttrValDict["DMG_ROLL"])
+        phys_raw = max(0, caster.ATK + roll - target.DEF)
+        magic_raw = max(0, caster.MAGIC - target.MAGIC_DEF)
+        final = phys_raw + magic_raw
+        is_crit = prd.roll(caster, "CRIT", caster.CRIT)
+        if is_crit and final > 0:
+            final = math.ceil(final * 1.5)
+        Ability.damage_target(final, target, "MAGIC", is_crit)
+        self.last_damage_dealt = getattr(self, 'last_damage_dealt', 0) + max(0, final)
+        return True   # skip generic damage path
+
+    def ManaSap(self, target, caster):
+        """Drain MP from the target; caster gains half of what was drained.
+        Does no HP damage. Cannot pull past the target's remaining MP."""
+        drain_amount = self.AttrValDict.get("DMG_ROLL", 0) or 0
+        base = self.AttrValDict.get("DMG_BASE", 0) or 0
+        want = max(1, base + randint(0, drain_amount))
+        drained = min(target.mp, want)
+        target.mp -= drained
+        gain = drained // 2
+        caster.mp += gain
+        print("{} sapped {} MP from {} (regained {} MP).".format(
+            str(caster), drained, str(target), gain))
+        return True   # skip generic damage path (Mana Sap is not HP damage)
+
+    def ArcaneShield(self, target, caster=None):
+        # Self-buff — marker effect. 50% of incoming damage is absorbed by
+        # MP first (see damage_target). No stat changes to apply/reverse.
+        if self.turns_left == self.AttrValDict["TICKS"]:
+            print("{} raises an Arcane Shield.".format(str(target)))
+        elif self.turns_left == 0:
+            print("{}'s Arcane Shield fades.".format(str(target)))
+
     def Uproar(self, target, caster=None):
         # Passive triggered by Battle when a teammate goes down: ATK+5 CRIT+8.
         if self.turns_left == self.AttrValDict["TICKS"]:
@@ -486,7 +543,7 @@ class Ability():
     def StabBackstab(self, target, caster):
         raw_damage = self.calculate_dmg(caster, "NORMAL")
         final_damage = self.calculate_def(raw_damage, target, "NORMAL")
-        is_crit = random.random() < caster.CRIT / 100
+        is_crit = prd.roll(caster, "CRIT", caster.CRIT)
         if is_crit and final_damage > 0:
             final_damage = math.ceil(final_damage * 1.5)
 

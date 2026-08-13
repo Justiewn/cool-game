@@ -57,6 +57,15 @@ Deeper handoff docs for each subsystem live alongside the code:
 - **[ai_readme.md](Prototypes/ai_readme.md)** — per-class strategy tables, target scorers, `sim.py` usage, tuning results, deliberate omissions, planned next steps.
 - **[abilities_readme.txt](Prototypes/abilities_readme.txt)** — field-by-field reference for `abilities.json`.
 
+## Hex prototype (sibling game)
+
+`Prototypes/hex/` is a spatial-tactics variant that reuses this codebase's
+combat model as a library: units occupy hexes, abilities have range and AoE,
+movement is its own action. Two new classes (Hunter, Spellblade), trap/focus
+mechanics, MP-absorbing shields. Run with `python Prototypes/hex/gui_hex.py`.
+See [Prototypes/hex/README.md](Prototypes/hex/README.md) and
+[Prototypes/hex/mechanics_readme.md](Prototypes/hex/mechanics_readme.md).
+
 ## Headless simulator
 
 For AI tuning without the GUI:
